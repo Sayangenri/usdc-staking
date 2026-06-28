@@ -94,7 +94,7 @@ async function initDb() {
       id INT PRIMARY KEY,
       last_synced_block INT NOT NULL
     );
-    INSERT INTO sync_status (id, last_synced_block) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+    INSERT INTO sync_status (id, last_synced_block) VALUES (1, 43093800) ON CONFLICT (id) DO NOTHING;
   `;
 
   try {

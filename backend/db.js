@@ -97,6 +97,19 @@ async function initDb() {
     INSERT INTO sync_status (id, last_synced_block) VALUES (1, 43093800) ON CONFLICT (id) DO NOTHING;
   `;
 
+  const createStakingRewardClaimsTable = `
+    CREATE TABLE IF NOT EXISTS staking_reward_claims (
+      id SERIAL PRIMARY KEY,
+      user_address VARCHAR(42) NOT NULL,
+      points_redeemed NUMERIC(78, 0) NOT NULL,
+      reward_type VARCHAR(50) DEFAULT 'POINTS_CLAIM',
+      tx_hash VARCHAR(66),
+      status VARCHAR(20) DEFAULT 'COMPLETED',
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_claims_user ON staking_reward_claims(user_address);
+  `;
+
   try {
     console.log('Connecting to PostgreSQL database...');
     const client = await pool.connect();
@@ -106,6 +119,7 @@ async function initDb() {
     await client.query(createStakingActionsTable);
     await client.query(createUserBalancesTable);
     await client.query(createSyncStatusTable);
+    await client.query(createStakingRewardClaimsTable);
     console.log('Database tables verified/created successfully.');
     
     client.release();

@@ -54,6 +54,9 @@ app.listen(PORT, async () => {
   
   // Start Blockchain Event Indexer
   startIndexer();
+
+  // Start Daily Points Update Job
+  startDailyPointsJob();
 });
 
 // --- Blockchain Event Indexer ---
@@ -316,4 +319,61 @@ function startIndexer() {
   
   const intervalMs = parseInt(process.env.INDEXER_INTERVAL_MS || '10000', 10);
   setInterval(syncBlockchainEvents, intervalMs);
+}
+
+// --- Daily Points Checkpoint Job ---
+
+async function runDailyPointsCheckpoint() {
+  console.log('Daily Points Job: Starting database points update job...');
+  try {
+    const now = new Date();
+    // Fetch all users with active stake
+    const result = await db.query(
+      'SELECT user_address, staked_balance, points, uncredited_seconds, last_checkpoint_time FROM user_balances WHERE staked_balance > 0'
+    );
+    
+    console.log(`Daily Points Job: Found ${result.rows.length} active stakers to update.`);
+    
+    for (const row of result.rows) {
+      const userAddress = row.user_address;
+      const stakedBalance = BigInt(row.staked_balance || '0');
+      const currentPoints = BigInt(row.points || '0');
+      const uncreditedSeconds = parseInt(row.uncredited_seconds || '0', 10);
+      const lastCheckpointTime = new Date(row.last_checkpoint_time);
+      
+      const elapsedMs = now.getTime() - lastCheckpointTime.getTime();
+      const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+      
+      const totalSeconds = elapsedSeconds + uncreditedSeconds;
+      const hoursEarned = Math.floor(totalSeconds / 3600);
+      
+      const newPoints = currentPoints + BigInt(hoursEarned * 10);
+      const newUncreditedSeconds = totalSeconds % 3600;
+      
+      // Update user database checkpoint to now
+      await db.query(
+        `UPDATE user_balances 
+         SET points = $1, 
+             uncredited_seconds = $2, 
+             last_checkpoint_time = $3, 
+             last_updated_at = NOW() 
+         WHERE user_address = $4`,
+        [newPoints.toString(), newUncreditedSeconds, now, userAddress]
+      );
+      
+      console.log(`Daily Points Job: Updated ${userAddress}. Earned ${hoursEarned * 10} points. Total: ${newPoints}. Carryover: ${newUncreditedSeconds}s`);
+    }
+    console.log('Daily Points Job: Completed successfully.');
+  } catch (error) {
+    console.error('Daily Points Job: Error during points update:', error);
+  }
+}
+
+function startDailyPointsJob() {
+  // Run once every 24 hours (24 * 60 * 60 * 1000 ms)
+  const intervalMs = 24 * 60 * 60 * 1000;
+  setInterval(runDailyPointsCheckpoint, intervalMs);
+  
+  // Run once shortly after startup (5 seconds) to catch up and verify it runs successfully
+  setTimeout(runDailyPointsCheckpoint, 5000);
 }

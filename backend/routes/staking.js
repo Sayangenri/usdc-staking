@@ -40,20 +40,79 @@ router.get('/history/:address', async (req, res) => {
   }
 
   try {
-    const queryText = `
+    // 1. Fetch staking actions
+    const stakingActionsQuery = `
       SELECT tx_hash, action_type, amount, block_number, timestamp
       FROM staking_actions
       WHERE LOWER(user_address) = LOWER($1)
       ORDER BY timestamp DESC
     `;
-    const result = await db.query(queryText, [userAddress]);
-    
-    const history = result.rows.map(row => ({
-      ...row,
+    const stakingResult = await db.query(stakingActionsQuery, [userAddress]);
+
+    const stakingHistory = stakingResult.rows.map(row => ({
+      type: 'staking',
+      action_type: row.action_type,
       amount: row.amount.toString(),
+      tx_hash: row.tx_hash,
+      block_number: row.block_number,
+      timestamp: row.timestamp
     }));
 
-    return res.json({ address: userAddress.toLowerCase(), history });
+    // 2. Fetch points history (if registered in users table)
+    const userRes = await db.query(
+      'SELECT id FROM users WHERE LOWER(wallet_address) = LOWER($1)',
+      [userAddress]
+    );
+
+    let pointsHistory = [];
+    if (userRes.rows.length > 0) {
+      const userId = userRes.rows[0].id;
+      const pointsHistoryQuery = `
+        SELECT 
+          ph.id, 
+          ph.points, 
+          ph.reason, 
+          ph.created_at as timestamp,
+          other_u.wallet_address as peer_address,
+          other_u.email as peer_email,
+          other_u.username as peer_username
+        FROM points_history ph
+        LEFT JOIN points_history other_ph ON (
+          -- Match by base prefix ID if generated sequentially
+          ((RIGHT(ph.id, 1) = '0' AND other_ph.id = SUBSTRING(ph.id, 1, LENGTH(ph.id) - 1) || '1') OR
+           (RIGHT(ph.id, 1) = '1' AND other_ph.id = SUBSTRING(ph.id, 1, LENGTH(ph.id) - 1) || '0'))
+          OR
+          -- Fallback: Match by exact transaction start timestamp, opposite points, and inverse reason
+          (ph.created_at = other_ph.created_at 
+           AND ph.points = -other_ph.points 
+           AND (
+             (ph.reason = 'points_transfer_sent' AND other_ph.reason = 'points_transfer_received') OR
+             (ph.reason = 'points_transfer_received' AND other_ph.reason = 'points_transfer_sent')
+           ))
+        )
+        LEFT JOIN users other_u ON other_ph.user_id = other_u.id
+        WHERE ph.user_id = $1
+        ORDER BY ph.created_at DESC
+      `;
+      const pointsResult = await db.query(pointsHistoryQuery, [userId]);
+      pointsHistory = pointsResult.rows.map(row => ({
+        type: 'points',
+        id: row.id,
+        points: parseInt(row.points || '0', 10),
+        reason: row.reason,
+        timestamp: row.timestamp,
+        peer_address: row.peer_address,
+        peer_email: row.peer_email,
+        peer_username: row.peer_username
+      }));
+    }
+
+    // 3. Combine and sort
+    const combinedHistory = [...stakingHistory, ...pointsHistory].sort((a, b) => {
+      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+    });
+
+    return res.json({ address: userAddress.toLowerCase(), history: combinedHistory });
   } catch (error) {
     console.error('Error fetching history:', error);
     return res.status(500).json({ error: 'Internal server error while fetching history.' });
@@ -90,6 +149,11 @@ router.get('/status/:address', async (req, res) => {
 
   // 1. Fetch from Database
   try {
+    const userRes = await db.query(
+      'SELECT total_points FROM users WHERE LOWER(wallet_address) = LOWER($1)',
+      [userAddress]
+    );
+
     const dbResult = await db.query(
       'SELECT staked_balance, points, uncredited_seconds, last_checkpoint_time FROM user_balances WHERE LOWER(user_address) = LOWER($1)',
       [userAddress]
@@ -98,7 +162,9 @@ router.get('/status/:address', async (req, res) => {
     if (dbResult.rows.length > 0) {
       const row = dbResult.rows[0];
       const stakedBalance = BigInt(row.staked_balance || '0');
-      const finalizedPoints = BigInt(row.points || '0');
+      const finalizedPoints = userRes.rows.length > 0
+        ? BigInt(userRes.rows[0].total_points || '0')
+        : BigInt(row.points || '0');
       const uncreditedSeconds = parseInt(row.uncredited_seconds || '0', 10);
       const lastCheckpointTime = new Date(row.last_checkpoint_time);
 
@@ -170,9 +236,15 @@ router.get('/status/:address', async (req, res) => {
 router.get('/leaderboard', async (req, res) => {
   try {
     const queryText = `
-      SELECT user_address, staked_balance, points, uncredited_seconds, last_checkpoint_time
-      FROM user_balances
-      ORDER BY points DESC, staked_balance DESC
+      SELECT 
+        ub.user_address, 
+        ub.staked_balance, 
+        COALESCE(u.total_points, ub.points) as points, 
+        ub.uncredited_seconds, 
+        ub.last_checkpoint_time
+      FROM user_balances ub
+      LEFT JOIN users u ON LOWER(u.wallet_address) = LOWER(ub.user_address)
+      ORDER BY ub.staked_balance DESC, points DESC
       LIMIT 50
     `;
     const result = await db.query(queryText);
@@ -201,14 +273,16 @@ router.get('/leaderboard', async (req, res) => {
       };
     });
 
-    // Re-sort in memory by estimatedTotalPoints in descending order
+    // Re-sort in memory by stakedBalance in descending order (with estimatedTotalPoints as tiebreaker)
     leaderboard.sort((a, b) => {
+      const stakedA = BigInt(a.stakedBalance);
+      const stakedB = BigInt(b.stakedBalance);
+      if (stakedB !== stakedA) {
+        return stakedB > stakedA ? 1 : -1;
+      }
       const pointsA = BigInt(a.estimatedTotalPoints);
       const pointsB = BigInt(b.estimatedTotalPoints);
-      if (pointsB !== pointsA) {
-        return pointsB > pointsA ? 1 : -1;
-      }
-      return BigInt(b.stakedBalance) > BigInt(a.stakedBalance) ? 1 : -1;
+      return pointsB > pointsA ? 1 : -1;
     });
 
     return res.json({ leaderboard });
@@ -260,6 +334,145 @@ router.get('/stats', async (req, res) => {
   }
 
   return res.json(stats);
+});
+
+/**
+ * POST /api/staking/transfer-points
+ * Transfers points from one user to another inside a single database transaction.
+ */
+router.post('/transfer-points', async (req, res) => {
+  const { senderAddress, recipientAddress, amount } = req.body;
+
+  // 1. Validation
+  if (!ethers.isAddress(senderAddress) || !ethers.isAddress(recipientAddress)) {
+    return res.status(400).json({ error: 'Sender and recipient must be valid Ethereum addresses.' });
+  }
+
+  if (senderAddress.toLowerCase() === recipientAddress.toLowerCase()) {
+    return res.status(400).json({ error: 'Cannot transfer points to yourself.' });
+  }
+
+  const transferAmount = parseInt(amount, 10);
+  if (isNaN(transferAmount) || transferAmount <= 0) {
+    return res.status(400).json({ error: 'Transfer amount must be a positive integer.' });
+  }
+
+  const client = await db.pool.connect();
+
+  try {
+    // Start SQL transaction
+    await client.query('BEGIN');
+
+    // 2. Verify and Lock Sender in users table (Auto-create if not exists to support dApp stakers)
+    let senderRes = await client.query(
+      'SELECT id, wallet_address, total_points FROM users WHERE LOWER(wallet_address) = LOWER($1) FOR UPDATE',
+      [senderAddress]
+    );
+
+    if (senderRes.rows.length === 0) {
+      // Fetch initial points balance from user_balances if they exist
+      const balanceRes = await client.query(
+        'SELECT points FROM user_balances WHERE LOWER(user_address) = LOWER($1)',
+        [senderAddress]
+      );
+      const initialPoints = balanceRes.rows.length > 0 ? parseInt(balanceRes.rows[0].points || '0', 10) : 0;
+      const newSenderId = Date.now().toString() + Math.floor(Math.random() * 100).toString().padStart(2, '0');
+
+      const dummyPrivyId = `did:privy:staking-${senderAddress.toLowerCase()}`;
+      const dummyEmail = `${senderAddress.toLowerCase()}@staking.dummy`;
+
+      // Insert sender into users table
+      await client.query(
+        `INSERT INTO users (id, privy_id, email, wallet_address, total_points, streak, league, referrals, created_at, updated_at, last_active_at)
+         VALUES ($1, $2, $3, $4, $5, 0, 'Bronze', 0, NOW(), NOW(), NOW())`,
+        [newSenderId, dummyPrivyId, dummyEmail, senderAddress, initialPoints]
+      );
+
+      // Lock row
+      senderRes = await client.query(
+        'SELECT id, wallet_address, total_points FROM users WHERE id = $1 FOR UPDATE',
+        [newSenderId]
+      );
+    }
+
+    const senderUser = senderRes.rows[0];
+    const senderTotalPoints = senderUser.total_points || 0;
+
+    if (senderTotalPoints < transferAmount) {
+      throw new Error(`Insufficient points balance. Sender has ${senderTotalPoints} points, attempting to transfer ${transferAmount}.`);
+    }
+
+    // 3. Verify and Lock Recipient in users table (lookup by address, email, username, or id)
+    const recipientRes = await client.query(
+      `SELECT id, wallet_address, total_points 
+       FROM users 
+       WHERE LOWER(wallet_address) = LOWER($1) 
+          OR LOWER(email) = LOWER($1) 
+          OR LOWER(username) = LOWER($1) 
+          OR id = $1 
+       FOR UPDATE`,
+      [recipientAddress]
+    );
+
+    if (recipientRes.rows.length === 0) {
+      throw new Error(`Recipient (${recipientAddress}) is not registered in the users table.`);
+    }
+
+    const recipientUser = recipientRes.rows[0];
+    const targetWalletAddress = recipientUser.wallet_address;
+
+    if (senderAddress.toLowerCase() === targetWalletAddress.toLowerCase()) {
+      throw new Error('Cannot transfer points to yourself.');
+    }
+
+    // Generate unique history IDs sharing the same prefix for self-join matching
+    const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    const baseId = Date.now().toString() + randomSuffix;
+    const senderHistoryId = baseId + '0';
+    const receiverHistoryId = baseId + '1';
+
+    // 4. Insert points_history record for both users (Sender = negative, Receiver = positive)
+    await client.query(
+      'INSERT INTO points_history (id, user_id, points, reason, created_at) VALUES ($1, $2, $3, $4, NOW())',
+      [senderHistoryId, senderUser.id, -transferAmount, 'points_transfer_sent']
+    );
+
+    await client.query(
+      'INSERT INTO points_history (id, user_id, points, reason, created_at) VALUES ($1, $2, $3, $4, NOW())',
+      [receiverHistoryId, recipientUser.id, transferAmount, 'points_transfer_received']
+    );
+
+    // 5. Update user points balances in 'users' table
+    await client.query(
+      'UPDATE users SET total_points = total_points - $1, updated_at = NOW() WHERE id = $2',
+      [transferAmount, senderUser.id]
+    );
+
+    await client.query(
+      'UPDATE users SET total_points = total_points + $1, updated_at = NOW() WHERE id = $2',
+      [transferAmount, recipientUser.id]
+    );
+
+    // Commit SQL transaction
+    await client.query('COMMIT');
+    client.release();
+
+    return res.json({
+      success: true,
+      message: 'Points transferred successfully.',
+      senderAddress: senderAddress.toLowerCase(),
+      recipientAddress: targetWalletAddress.toLowerCase(),
+      amount: transferAmount,
+      senderNewBalance: senderTotalPoints - transferAmount
+    });
+
+  } catch (error) {
+    // Rollback SQL transaction on any failure
+    await client.query('ROLLBACK');
+    client.release();
+    console.error('Transfer Points Error:', error.message || error);
+    return res.status(400).json({ error: error.message || 'Points transfer failed.' });
+  }
 });
 
 module.exports = router;

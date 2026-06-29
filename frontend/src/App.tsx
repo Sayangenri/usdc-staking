@@ -3,9 +3,7 @@ import {
   Coins, 
   Lock, 
   Unlock, 
-  TrendingUp, 
   History, 
-  User, 
   Award, 
   AlertTriangle, 
   CheckCircle, 
@@ -13,7 +11,8 @@ import {
   Clock, 
   Settings,
   RefreshCw,
-  Wallet
+  Wallet,
+  Send
 } from 'lucide-react';
 import './App.css';
 import stakingArtifact from './USDCStaking.json';
@@ -46,7 +45,6 @@ function App() {
 
   // Off-Chain Points State (from Backend)
   const [finalizedPoints, setFinalizedPoints] = useState<string>('0');
-  const [pendingPoints, setPendingPoints] = useState<string>('0');
   const [estimatedTotalPoints, setEstimatedTotalPoints] = useState<string>('0');
   const [secondsToNextHour, setSecondsToNextHour] = useState<number>(3600);
   const [uncreditedSeconds, setUncreditedSeconds] = useState<number>(0);
@@ -71,6 +69,13 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected'>('disconnected');
+
+  // Points Transfer state
+  const [transferRecipient, setTransferRecipient] = useState<string>('');
+  const [transferAmount, setTransferAmount] = useState<string>('');
+  const [transferLoading, setTransferLoading] = useState<boolean>(false);
+  const [transferError, setTransferError] = useState<string>('');
+  const [transferSuccess, setTransferSuccess] = useState<string>('');
 
   // Refs for tracking real-time timers
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -117,7 +122,6 @@ function App() {
         
         // Database point states
         setFinalizedPoints(statusData.database.finalizedPoints);
-        setPendingPoints(statusData.database.pendingPoints);
         setEstimatedTotalPoints(statusData.database.estimatedTotalPoints);
         setSecondsToNextHour(statusData.database.secondsToNextHour);
         setUncreditedSeconds(statusData.database.uncreditedSeconds);
@@ -212,7 +216,6 @@ function App() {
     setStakedBalance('0');
     setAllowance('0');
     setFinalizedPoints('0');
-    setPendingPoints('0');
     setEstimatedTotalPoints('0');
     setHistory([]);
   };
@@ -221,6 +224,11 @@ function App() {
   const handleApprove = async () => {
     if (!isConnected || !account || !stakingAddress || !usdcAddress) {
       setError('Please connect your wallet first.');
+      return;
+    }
+
+    if (!stakeAmount || parseFloat(stakeAmount) <= 0) {
+      setError('Please enter a valid amount greater than 0.');
       return;
     }
     
@@ -248,13 +256,89 @@ function App() {
       
       await tx.wait();
       
-      setSuccessMsg('USDC approved successfully! You can now stake.');
+      setSuccessMsg('USDC approved successfully! Initiating stake transaction...');
       await fetchUserData(account);
+
+      // Automatically proceed to stake
+      const stakingAbi = [
+        'function stake(uint256 amount) external'
+      ];
+      const stakingContract = new ethers.Contract(stakingAddress, stakingAbi, signer);
+      const parsedAmount = ethers.parseUnits(stakeAmount, 6);
+      
+      console.log(`Automatically staking ${stakeAmount} USDC after approval...`);
+      const stakeTx = await stakingContract.stake(parsedAmount);
+      setSuccessMsg('Staking transaction submitted! Waiting for confirmation...');
+      
+      await stakeTx.wait();
+      
+      setSuccessMsg(`Staked ${stakeAmount} USDC successfully!`);
+      setStakeAmount('');
+      
+      // Fetch latest stats & user data
+      await fetchUserData(account);
+      await fetchGlobalData();
     } catch (e: any) {
-      console.error('Approval failed:', e);
-      setError(e.message || 'Approval transaction failed.');
+      console.error('Transaction failed:', e);
+      setError(e.message || 'Transaction failed.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTransferPoints = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!account) {
+      setTransferError('Please connect your wallet first.');
+      return;
+    }
+
+    if (!transferRecipient) {
+      setTransferError('Please enter a recipient wallet address.');
+      return;
+    }
+
+    const amt = parseInt(transferAmount, 10);
+    if (isNaN(amt) || amt <= 0) {
+      setTransferError('Please enter a valid points amount greater than 0.');
+      return;
+    }
+
+    setTransferError('');
+    setTransferSuccess('');
+    setTransferLoading(true);
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/staking/transfer-points`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          senderAddress: account,
+          recipientAddress: transferRecipient,
+          amount: amt
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to transfer points.');
+      }
+
+      setTransferSuccess(`Transferred ${amt} PTS to ${transferRecipient.slice(0, 6)}...${transferRecipient.slice(-4)} successfully!`);
+      setTransferRecipient('');
+      setTransferAmount('');
+      
+      // Refresh user stats & global rankings
+      await fetchUserData(account);
+      await fetchGlobalData();
+    } catch (err: any) {
+      console.error('Points transfer error:', err);
+      setTransferError(err.message || 'Points transfer failed.');
+    } finally {
+      setTransferLoading(false);
     }
   };
 
@@ -401,7 +485,6 @@ function App() {
         setSecondsToNextHour((prev) => {
           if (prev <= 1) {
             // Hour elapsed! Add points locally and reset
-            setPendingPoints((prevPts) => (BigInt(prevPts) + 10n).toString());
             setEstimatedTotalPoints((prevTotal) => (BigInt(prevTotal) + 10n).toString());
             return 3600;
           }
@@ -456,10 +539,29 @@ function App() {
       {/* Header */}
       <header className="app-header">
         <div className="brand">
-          <div className="brand-logo">B</div>
+          <img src="/myradlogo.png" className="brand-logo" alt="MYRAD Logo" style={{ 
+            background: 'transparent', 
+            borderRadius: '8px',
+            objectFit: 'contain'
+          }} />
           <div className="brand-text">
-            <h1>Base USDC Staking</h1>
-            <span>OFF-CHAIN POINTS PLATFORM</span>
+            <h1 style={{ 
+              letterSpacing: '1px', 
+              fontFamily: "var(--font-heading)", 
+              fontSize: '20px', 
+              fontWeight: 800,
+              lineHeight: 1
+            }}>
+              MYRAD <span style={{ 
+                fontFamily: "'Instrument Serif', Georgia, serif", 
+                fontStyle: 'italic', 
+                textTransform: 'lowercase', 
+                fontWeight: 400,
+                fontSize: '22px',
+                marginLeft: '2px',
+                letterSpacing: '0px'
+              }}>stake</span>
+            </h1>
           </div>
         </div>
 
@@ -567,11 +669,6 @@ function App() {
           <span className="desc">Per full hour per address</span>
         </div>
 
-        <div className="stat-card glass-card">
-          <span className="label">Reward System</span>
-          <span className="value">Off-Chain</span>
-          <span className="desc">Base Network Point Indexer</span>
-        </div>
       </section>
 
       {/* Dashboard Main Grid */}
@@ -747,6 +844,74 @@ function App() {
               </div>
             </div>
           </section>
+
+          {/* Points Transfer Card */}
+          {isConnected && (
+            <section className="staking-card glass-card">
+              <h2 className="card-title">
+                <Send size={20} className="gradient-text-blue" />
+                Transfer Points
+              </h2>
+              
+              {transferError && (
+                <div className="custom-alert error" style={{ fontSize: '13px', padding: '10px 14px', marginBottom: '16px' }}>
+                  <AlertTriangle size={16} />
+                  <span>{transferError}</span>
+                </div>
+              )}
+              
+              {transferSuccess && (
+                <div className="custom-alert success" style={{ fontSize: '13px', padding: '10px 14px', marginBottom: '16px' }}>
+                  <CheckCircle size={16} />
+                  <span>{transferSuccess}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleTransferPoints}>
+                <div className="input-label-row" style={{ fontSize: '13px', marginBottom: '6px' }}>
+                  <span>Recipient (ID, Email, Username, or Address)</span>
+                </div>
+                <div className="input-wrapper" style={{ height: '48px', marginBottom: '16px' }}>
+                  <input 
+                    type="text" 
+                    className="stake-input" 
+                    style={{ fontSize: '14px', padding: '0 12px', height: '44px' }}
+                    placeholder="email, username, 0x..., or user ID" 
+                    value={transferRecipient}
+                    onChange={(e) => setTransferRecipient(e.target.value)}
+                    disabled={transferLoading}
+                  />
+                </div>
+
+                <div className="input-label-row" style={{ fontSize: '13px', marginBottom: '6px' }}>
+                  <span>Amount of Points</span>
+                </div>
+                <div className="input-wrapper" style={{ height: '48px', marginBottom: '20px' }}>
+                  <input 
+                    type="number" 
+                    className="stake-input" 
+                    style={{ fontSize: '14px', padding: '0 12px', height: '44px' }}
+                    placeholder="0" 
+                    value={transferAmount}
+                    onChange={(e) => setTransferAmount(e.target.value)}
+                    disabled={transferLoading}
+                  />
+                  <div className="token-badge" style={{ fontSize: '13px', padding: '6px 12px' }}>
+                    PTS
+                  </div>
+                </div>
+
+                <button 
+                  type="submit" 
+                  className="btn btn-primary" 
+                  style={{ width: '100%', height: '48px', fontSize: '14px' }}
+                  disabled={transferLoading || !transferRecipient || !transferAmount}
+                >
+                  {transferLoading ? 'Transferring...' : 'Transfer Points'}
+                </button>
+              </form>
+            </section>
+          )}
         </div>
 
         {/* Right Column */}
@@ -819,10 +984,54 @@ function App() {
                 <div className="empty-state">No recent activities found.</div>
               ) : (
                 history.map((tx, idx) => {
-                  const isStake = tx.action_type === 'STAKE';
+                  const isPoints = tx.type === 'points';
                   const formattedTime = new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                   const formattedDate = new Date(tx.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
                   
+                  if (isPoints) {
+                    const isSent = tx.reason === 'points_transfer_sent';
+                    const isReceived = tx.reason === 'points_transfer_received';
+                    
+                    let actionLabel = 'Points Action';
+                    if (isSent) {
+                      const targetStr = tx.peer_address ? shortenAddress(tx.peer_address) : (tx.peer_username || tx.peer_email || 'unknown');
+                      actionLabel = `Sent PTS to ${targetStr}`;
+                    } else if (isReceived) {
+                      const sourceStr = tx.peer_address ? shortenAddress(tx.peer_address) : (tx.peer_username || tx.peer_email || 'unknown');
+                      actionLabel = `Received PTS from ${sourceStr}`;
+                    } else if (tx.reason === 'first_access_bonus') {
+                      actionLabel = 'First Access Bonus';
+                    } else {
+                      actionLabel = tx.reason ? tx.reason.replace(/_/g, ' ') : 'Points Earned';
+                    }
+
+                    return (
+                      <div key={tx.id || idx} className="history-item">
+                        <div className="history-item-left">
+                          <div className={`history-icon ${isSent ? 'withdraw' : 'stake'}`}>
+                            {isSent ? <Send size={14} /> : <Award size={14} />}
+                          </div>
+                          <div className="history-item-info">
+                            <span className="history-action-label" style={{ textTransform: 'capitalize' }}>
+                              {actionLabel}
+                            </span>
+                            <span className="history-time">{formattedDate} • {formattedTime}</span>
+                          </div>
+                        </div>
+
+                        <div className="history-item-right">
+                          <span className="history-amount" style={{ color: isSent ? '#ff4a4a' : '#10b981' }}>
+                            {tx.points > 0 ? '+' : ''}{tx.points.toLocaleString()} PTS
+                          </span>
+                          <span className="history-tx-link" style={{ cursor: 'default', textDecoration: 'none', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px', fontSize: '9px' }}>
+                            Off-chain
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  const isStake = tx.action_type === 'STAKE';
                   return (
                     <div key={tx.tx_hash || idx} className="history-item">
                       <div className="history-item-left">

@@ -33,7 +33,6 @@
   font-weight: 800;
   font-size: 20px;
   color: white;
-  box-shadow: 0 0 15px rgba(0, 82, 255, 0.4);
 }
 
 .brand-text h1 {
@@ -96,14 +95,15 @@
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--base-blue) 0%, #0070ff 100%);
+  background: #0f172a;
   color: white;
-  box-shadow: 0 4px 14px var(--base-blue-glow);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 82, 255, 0.6);
+  background: #1e293b;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
 }
 
 .btn-primary:active:not(:disabled) {
@@ -203,7 +203,7 @@
 
 .tabs {
   display: flex;
-  background: rgba(0, 0, 0, 0.2);
+  background: #f1f5f9;
   padding: 4px;
   border-radius: 12px;
   margin-bottom: 20px;
@@ -223,9 +223,9 @@
 }
 
 .tab.active {
-  background: var(--bg-secondary);
-  color: white;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  background: #ffffff;
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .input-label-row {
@@ -248,7 +248,7 @@
 
 .input-wrapper {
   position: relative;
-  background: rgba(0, 0, 0, 0.2);
+  background: #f8fafc;
   border: 1px solid var(--border-color);
   border-radius: 16px;
   padding: 12px 16px;
@@ -268,7 +268,7 @@
   font-family: var(--font-sans);
   font-size: 24px;
   font-weight: 700;
-  color: white;
+  color: var(--text-primary);
   width: 100%;
 }
 
@@ -306,8 +306,8 @@
 /* Points Card */
 .points-card {
   padding: 24px;
-  background: linear-gradient(135deg, rgba(0, 82, 255, 0.05) 0%, rgba(0, 210, 255, 0.05) 100%);
-  border: 1px solid rgba(0, 82, 255, 0.2);
+  background: #ffffff;
+  border: 1px solid rgba(0, 82, 255, 0.15);
   position: relative;
   overflow: hidden;
 }
@@ -334,7 +334,7 @@
   font-family: var(--font-heading);
   font-size: 48px;
   font-weight: 800;
-  color: white;
+  color: var(--text-primary);
   line-height: 1;
   display: flex;
   align-items: baseline;
@@ -384,9 +384,9 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: rgba(0, 0, 0, 0.2);
+  background: #f8fafc;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.02);
   margin-top: 16px;
   font-size: 13px;
   color: var(--text-secondary);
@@ -430,7 +430,7 @@
 .leaderboard-table td {
   padding: 12px 12px;
   font-size: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid #f1f5f9;
 }
 
 .leaderboard-row:hover {
@@ -464,7 +464,7 @@
 
 .leaderboard-pts {
   font-weight: 700;
-  color: white;
+  color: var(--text-primary);
 }
 
 /* History Card */
@@ -488,7 +488,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 12px;
-  background: rgba(0, 0, 0, 0.15);
+  background: #f8fafc;
   border-radius: 12px;
   border: 1px solid var(--border-color);
   font-size: 13px;
@@ -519,7 +519,7 @@
 
 .history-action-label {
   font-weight: 600;
-  color: white;
+  color: var(--text-primary);
 }
 
 .history-time {
@@ -605,11 +605,11 @@
 }
 
 .config-input {
-  background: rgba(0, 0, 0, 0.3);
+  background: #ffffff;
   border: 1px solid var(--border-color);
   padding: 8px 12px;
   border-radius: 10px;
-  color: white;
+  color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: 12px;
   flex-grow: 1;

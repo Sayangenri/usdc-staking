@@ -12,10 +12,11 @@ import {
   Settings,
   RefreshCw,
   Wallet,
-  Send
+  Send,
+  Info
 } from 'lucide-react';
 import './App.css';
-import stakingArtifact from './USDCStaking.json';
+import stakingArtifact from './AAVEStaking.json';
 
 declare global {
   interface Window {
@@ -25,7 +26,7 @@ declare global {
 
 // Default Configuration
 const BACKEND_URL = 'http://localhost:3001';
-const BASE_SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+const BASE_MAINNET_AAVE = '0x63706E401C06Ac8513145b7687A14804d17F814b';
 
 function App() {
   // Wallet state
@@ -35,11 +36,11 @@ function App() {
   
   // Contracts configuration
   const [stakingAddress, setStakingAddress] = useState<string>(stakingArtifact.address || '');
-  const [usdcAddress, setUsdcAddress] = useState<string>(stakingArtifact.usdcAddress || BASE_SEPOLIA_USDC);
+  const [aaveAddress, setAaveAddress] = useState<string>(stakingArtifact.aaveAddress || BASE_MAINNET_AAVE);
   const [showConfig, setShowConfig] = useState(false);
 
-  // On-Chain User State (USDC has 6 decimals)
-  const [usdcBalance, setUsdcBalance] = useState<string>('0');
+  // On-Chain User State (AAVE has 18 decimals)
+  const [aaveBalance, setAaveBalance] = useState<string>('0');
   const [stakedBalance, setStakedBalance] = useState<string>('0');
   const [allowance, setAllowance] = useState<string>('0');
 
@@ -126,9 +127,9 @@ function App() {
         setSecondsToNextHour(statusData.database.secondsToNextHour);
         setUncreditedSeconds(statusData.database.uncreditedSeconds);
 
-        // Update on-chain balances in UI (formatted from 6 decimals)
-        setUsdcBalance(formatUSDC(statusData.onChain.usdcBalance));
-        setStakedBalance(formatUSDC(statusData.onChain.stakedBalance));
+        // Update on-chain balances in UI (formatted from 18 decimals)
+        setAaveBalance(formatAAVE(statusData.onChain.aaveBalance));
+        setStakedBalance(formatAAVE(statusData.onChain.stakedBalance));
       }
     } catch (e) {
       console.warn('Could not retrieve user stats from backend.');
@@ -151,22 +152,60 @@ function App() {
 
   // Check allowance directly on-chain using window.ethereum provider
   const checkOnChainAllowance = async (walletAddress: string) => {
-    if (!window.ethereum || !stakingAddress || !usdcAddress) return;
+    if (!window.ethereum || !stakingAddress || !aaveAddress) return;
     try {
       const { ethers } = await import('ethers');
       const provider = new ethers.BrowserProvider(window.ethereum);
       
-      const usdcAbi = [
+      const aaveAbi = [
         'function balanceOf(address account) external view returns (uint256)',
         'function allowance(address owner, address spender) external view returns (uint256)'
       ];
       
-      const usdcContract = new ethers.Contract(usdcAddress, usdcAbi, provider);
-      const currentAllowance = await usdcContract.allowance(walletAddress, stakingAddress);
-      setAllowance(formatUSDC(currentAllowance));
+      const aaveContract = new ethers.Contract(aaveAddress, aaveAbi, provider);
+      const currentAllowance = await aaveContract.allowance(walletAddress, stakingAddress);
+      setAllowance(formatAAVE(currentAllowance));
     } catch (e) {
       console.warn('Failed to query on-chain allowance:', e);
     }
+  };
+
+  const switchNetwork = async () => {
+    if (!window.ethereum) return false;
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x2105' }], // 8453 in hex (Base Mainnet)
+      });
+      return true;
+    } catch (switchError: any) {
+      // Code 4902 indicates that the chain has not been added to MetaMask.
+      if (switchError.code === 4902) {
+        try {
+          await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [
+              {
+                chainId: '0x2105',
+                chainName: 'Base',
+                nativeCurrency: {
+                  name: 'Ether',
+                  symbol: 'ETH',
+                  decimals: 18,
+                },
+                rpcUrls: ['https://mainnet.base.org'],
+                blockExplorerUrls: ['https://basescan.org'],
+              },
+            ],
+          });
+          return true;
+        } catch (addError) {
+          console.error('Failed to add Base network:', addError);
+        }
+      }
+      console.error('Failed to switch to Base network:', switchError);
+    }
+    return false;
   };
 
   // 3. Connect Wallet
@@ -189,16 +228,22 @@ function App() {
       setIsConnected(true);
 
       const provider = new ethers.BrowserProvider(window.ethereum);
-      const network = await provider.getNetwork();
+      let network = await provider.getNetwork();
       
-      // Handle Base Sepolia Chain ID (84532)
-      if (network.chainId === 84532n) {
-        setNetworkName('Base Sepolia');
-      } else if (network.chainId === 8453n) {
+      // Handle Base Mainnet Chain ID (8453)
+      if (network.chainId !== 8453n) {
+        const switched = await switchNetwork();
+        if (switched) {
+          const updatedProvider = new ethers.BrowserProvider(window.ethereum);
+          network = await updatedProvider.getNetwork();
+        }
+      }
+
+      if (network.chainId === 8453n) {
         setNetworkName('Base Mainnet');
       } else {
         setNetworkName(`Unsupported Chain (${network.chainId})`);
-        setError('Please switch your wallet to Base Sepolia Testnet.');
+        setError('Please switch your wallet to Base Mainnet.');
       }
 
       await fetchUserData(activeAddress);
@@ -212,7 +257,7 @@ function App() {
     setAccount(null);
     setIsConnected(false);
     setNetworkName('Not Connected');
-    setUsdcBalance('0');
+    setAaveBalance('0');
     setStakedBalance('0');
     setAllowance('0');
     setFinalizedPoints('0');
@@ -222,7 +267,7 @@ function App() {
 
   // 4. Smart Contract Actions
   const handleApprove = async () => {
-    if (!isConnected || !account || !stakingAddress || !usdcAddress) {
+    if (!isConnected || !account || !stakingAddress || !aaveAddress) {
       setError('Please connect your wallet first.');
       return;
     }
@@ -241,22 +286,32 @@ function App() {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
 
-      const usdcAbi = [
+      const network = await provider.getNetwork();
+      if (network.chainId !== 8453n) {
+        setError('Please switch your wallet to Base Mainnet.');
+        const switched = await switchNetwork();
+        if (!switched) {
+          setLoading(false);
+          return;
+        }
+      }
+
+      const aaveAbi = [
         'function approve(address spender, uint256 amount) external returns (bool)'
       ];
       
-      const usdcContract = new ethers.Contract(usdcAddress, usdcAbi, signer);
+      const aaveContract = new ethers.Contract(aaveAddress, aaveAbi, signer);
       
       // Approve max amount to avoid repeated approvals
       const maxAmount = ethers.MaxUint256;
       
-      console.log('Requesting USDC approval...');
-      const tx = await usdcContract.approve(stakingAddress, maxAmount);
+      console.log('Requesting AAVE approval...');
+      const tx = await aaveContract.approve(stakingAddress, maxAmount);
       setSuccessMsg('Approval transaction submitted! Waiting for confirmation...');
       
       await tx.wait();
       
-      setSuccessMsg('USDC approved successfully! Initiating stake transaction...');
+      setSuccessMsg('AAVE approved successfully! Initiating stake transaction...');
       await fetchUserData(account);
 
       // Automatically proceed to stake
@@ -264,15 +319,15 @@ function App() {
         'function stake(uint256 amount) external'
       ];
       const stakingContract = new ethers.Contract(stakingAddress, stakingAbi, signer);
-      const parsedAmount = ethers.parseUnits(stakeAmount, 6);
+      const parsedAmount = ethers.parseUnits(stakeAmount, 18);
       
-      console.log(`Automatically staking ${stakeAmount} USDC after approval...`);
+      console.log(`Automatically staking ${stakeAmount} AAVE after approval...`);
       const stakeTx = await stakingContract.stake(parsedAmount);
       setSuccessMsg('Staking transaction submitted! Waiting for confirmation...');
       
       await stakeTx.wait();
       
-      setSuccessMsg(`Staked ${stakeAmount} USDC successfully!`);
+      setSuccessMsg(`Staked ${stakeAmount} AAVE successfully!`);
       setStakeAmount('');
       
       // Fetch latest stats & user data
@@ -362,22 +417,32 @@ function App() {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
 
+      const network = await provider.getNetwork();
+      if (network.chainId !== 8453n) {
+        setError('Please switch your wallet to Base Mainnet.');
+        const switched = await switchNetwork();
+        if (!switched) {
+          setLoading(false);
+          return;
+        }
+      }
+
       const stakingAbi = [
         'function stake(uint256 amount) external'
       ];
       
       const stakingContract = new ethers.Contract(stakingAddress, stakingAbi, signer);
       
-      // Parse with 6 decimals for USDC
-      const parsedAmount = ethers.parseUnits(stakeAmount, 6);
+      // Parse with 18 decimals for AAVE
+      const parsedAmount = ethers.parseUnits(stakeAmount, 18);
       
-      console.log(`Staking ${stakeAmount} USDC...`);
+      console.log(`Staking ${stakeAmount} AAVE...`);
       const tx = await stakingContract.stake(parsedAmount);
       setSuccessMsg('Staking transaction submitted! Waiting for confirmation...');
       
       await tx.wait();
       
-      setSuccessMsg(`Staked ${stakeAmount} USDC successfully!`);
+      setSuccessMsg(`Staked ${stakeAmount} AAVE successfully!`);
       setStakeAmount('');
       
       // Fetch latest stats & user data
@@ -411,22 +476,32 @@ function App() {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
 
+      const network = await provider.getNetwork();
+      if (network.chainId !== 8453n) {
+        setError('Please switch your wallet to Base Mainnet.');
+        const switched = await switchNetwork();
+        if (!switched) {
+          setLoading(false);
+          return;
+        }
+      }
+
       const stakingAbi = [
         'function withdraw(uint256 amount) external'
       ];
       
       const stakingContract = new ethers.Contract(stakingAddress, stakingAbi, signer);
       
-      // Parse with 6 decimals for USDC
-      const parsedAmount = ethers.parseUnits(unstakeAmount, 6);
+      // Parse with 18 decimals for AAVE
+      const parsedAmount = ethers.parseUnits(unstakeAmount, 18);
       
-      console.log(`Unstaking ${unstakeAmount} USDC...`);
+      console.log(`Unstaking ${unstakeAmount} AAVE...`);
       const tx = await stakingContract.withdraw(parsedAmount);
       setSuccessMsg('Withdraw transaction submitted! Waiting for confirmation...');
       
       await tx.wait();
       
-      setSuccessMsg(`Withdrew ${unstakeAmount} USDC successfully!`);
+      setSuccessMsg(`Withdrew ${unstakeAmount} AAVE successfully!`);
       setUnstakeAmount('');
       
       // Fetch latest stats & user data
@@ -473,7 +548,7 @@ function App() {
     return () => {
       clearInterval(dataInterval);
     };
-  }, [account, stakingAddress, usdcAddress]);
+  }, [account, stakingAddress, aaveAddress]);
 
   // Points Tick-up Timer (Ticking every 1s)
   useEffect(() => {
@@ -499,18 +574,18 @@ function App() {
   }, [stakedBalance]);
 
   // Helper formats
-  const formatUSDC = (amount: bigint | string) => {
+  const formatAAVE = (amount: bigint | string) => {
     try {
       const { ethers } = require('ethers');
-      return ethers.formatUnits(amount, 6);
+      return ethers.formatUnits(amount, 18);
     } catch (e) {
       // Manual formatting if ethers require fails in synchronous block
       const str = amount.toString();
       if (str === '0') return '0.00';
-      if (str.length <= 6) {
-        return '0.' + str.padStart(6, '0');
+      if (str.length <= 18) {
+        return '0.' + str.padStart(18, '0').slice(0, 4);
       }
-      return str.slice(0, -6) + '.' + str.slice(-6, -4);
+      return str.slice(0, -18) + '.' + str.slice(-18, -14);
     }
   };
 
@@ -525,7 +600,7 @@ function App() {
   };
 
   const handleMaxStake = () => {
-    setStakeAmount(usdcBalance);
+    setStakeAmount(aaveBalance);
   };
 
   const handleMaxUnstake = () => {
@@ -601,7 +676,7 @@ function App() {
             </button>
           </div>
           <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-            Ensure these match your deployed smart contract addresses on Base Sepolia.
+            Ensure these match your deployed smart contract addresses on Base Mainnet.
           </p>
           <div className="config-input-row">
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -615,19 +690,19 @@ function App() {
               />
             </div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>USDC Token Address</label>
+              <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>AAVE Token Address</label>
               <input 
                 type="text" 
                 className="config-input" 
-                value={usdcAddress}
-                onChange={(e) => setUsdcAddress(e.target.value)}
+                value={aaveAddress}
+                onChange={(e) => setAaveAddress(e.target.value)}
                 placeholder="0x..."
               />
             </div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
             <span>Backend API: <strong>{backendStatus === 'connected' ? 'ONLINE' : 'OFFLINE'}</strong></span>
-            <span>Default Base Sepolia USDC: <code>{BASE_SEPOLIA_USDC.slice(0, 10)}...</code></span>
+            <span>Default Base Mainnet AAVE: <code>{BASE_MAINNET_AAVE.slice(0, 10)}...</code></span>
           </div>
         </div>
       )}
@@ -652,15 +727,15 @@ function App() {
         <div className="stat-card glass-card">
           <span className="label">Total Value Locked</span>
           <span className="value gradient-text-blue">
-            {parseFloat(formatUSDC(globalStats.tvl)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {parseFloat(formatAAVE(globalStats.tvl)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
-          <span className="desc">USDC Staked On-Chain</span>
+          <span className="desc">AAVE Staked On-Chain</span>
         </div>
 
         <div className="stat-card glass-card">
           <span className="label">Stakers Count</span>
           <span className="value">{globalStats.totalStakers}</span>
-          <span className="desc">Active wallets staking USDC</span>
+          <span className="desc">Active wallets staking AAVE</span>
         </div>
 
         <div className="stat-card glass-card">
@@ -705,7 +780,7 @@ function App() {
                     <span>
                       Wallet Balance:{' '}
                       <span className="balance-helper" onClick={handleMaxStake}>
-                        {parseFloat(usdcBalance).toFixed(2)} USDC
+                        {parseFloat(aaveBalance).toFixed(2)} AAVE
                       </span>
                     </span>
                   )}
@@ -721,8 +796,8 @@ function App() {
                     disabled={loading || !isConnected}
                   />
                   <div className="token-badge">
-                    <div className="token-logo-usdc">S</div>
-                    USDC
+                    <div className="token-logo-aave">A</div>
+                    AAVE
                   </div>
                 </div>
 
@@ -737,15 +812,15 @@ function App() {
                       onClick={handleApprove}
                       disabled={loading || !stakeAmount || parseFloat(stakeAmount) <= 0}
                     >
-                      {loading ? 'Processing...' : 'Approve USDC'}
+                      {loading ? 'Processing...' : 'Approve AAVE'}
                     </button>
                   ) : (
                     <button 
                       className="btn btn-primary" 
                       onClick={handleStake}
-                      disabled={loading || !stakeAmount || parseFloat(stakeAmount) <= 0 || parseFloat(stakeAmount) > parseFloat(usdcBalance)}
+                      disabled={loading || !stakeAmount || parseFloat(stakeAmount) <= 0 || parseFloat(stakeAmount) > parseFloat(aaveBalance)}
                     >
-                      {loading ? 'Processing...' : 'Stake USDC'}
+                      {loading ? 'Processing...' : 'Stake AAVE'}
                     </button>
                   )}
                 </div>
@@ -758,7 +833,7 @@ function App() {
                     <span>
                       Staked Balance:{' '}
                       <span className="balance-helper" onClick={handleMaxUnstake}>
-                        {parseFloat(stakedBalance).toFixed(2)} USDC
+                        {parseFloat(stakedBalance).toFixed(2)} AAVE
                       </span>
                     </span>
                   )}
@@ -774,8 +849,8 @@ function App() {
                     disabled={loading || !isConnected}
                   />
                   <div className="token-badge">
-                    <div className="token-logo-usdc">S</div>
-                    USDC
+                    <div className="token-logo-aave">A</div>
+                    AAVE
                   </div>
                 </div>
 
@@ -790,7 +865,7 @@ function App() {
                       onClick={handleUnstake}
                       disabled={loading || !unstakeAmount || parseFloat(unstakeAmount) <= 0 || parseFloat(unstakeAmount) > parseFloat(stakedBalance)}
                     >
-                      {loading ? 'Processing...' : 'Unstake USDC'}
+                      {loading ? 'Processing...' : 'Unstake AAVE'}
                     </button>
                   )}
                 </div>
@@ -825,23 +900,42 @@ function App() {
             ) : (
               <div className="timer-section" style={{ color: 'var(--text-muted)' }}>
                 <Clock size={16} />
-                <span>Stake USDC to start earning 10 points per hour</span>
+                <span>Stake AAVE to start earning 10 points per hour</span>
               </div>
             )}
 
             <div className="points-breakdown">
               <div className="breakdown-item">
                 <span className="label">On-Chain Staked</span>
-                <span className="val">{parseFloat(stakedBalance).toFixed(2)} USDC</span>
+                <span className="val">{parseFloat(stakedBalance).toFixed(2)} AAVE</span>
               </div>
               <div className="breakdown-item">
-                <span className="label">Accrued (DB)</span>
+                <span className="label">Accrued</span>
                 <span className="val">{parseFloat(finalizedPoints).toLocaleString()} PTS</span>
               </div>
               <div className="breakdown-item">
                 <span className="label">Uncredited Session</span>
                 <span className="val">{formatTime(uncreditedSeconds)}</span>
               </div>
+            </div>
+            
+            {/* Info text explaining daily database update */}
+            <div style={{ 
+              fontSize: '11px', 
+              color: 'var(--text-muted)', 
+              marginTop: '14px', 
+              display: 'flex', 
+              alignItems: 'flex-start', 
+              gap: '6px',
+              background: 'rgba(0, 82, 255, 0.03)',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              border: '1px dashed rgba(0, 82, 255, 0.15)'
+            }}>
+              <Info size={14} style={{ color: 'var(--base-blue)', marginTop: '1px', flexShrink: 0 }} />
+              <span style={{ lineHeight: '1.4' }}>
+                Pending points from the <strong>uncredited session</strong> are finalized and credited to your balance once a day (every 24 hours).
+              </span>
             </div>
           </section>
 
@@ -956,7 +1050,7 @@ function App() {
                             </span>
                           </td>
                           <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                            {parseFloat(formatUSDC(staker.stakedBalance)).toFixed(0)} USDC
+                            {parseFloat(formatAAVE(staker.stakedBalance)).toFixed(2)} AAVE
                           </td>
                           <td style={{ textAlign: 'right', fontWeight: 'bold' }} className="leaderboard-pts">
                             {parseFloat(staker.estimatedTotalPoints).toLocaleString()}
@@ -1023,9 +1117,7 @@ function App() {
                           <span className="history-amount" style={{ color: isSent ? '#ff4a4a' : '#10b981' }}>
                             {tx.points > 0 ? '+' : ''}{tx.points.toLocaleString()} PTS
                           </span>
-                          <span className="history-tx-link" style={{ cursor: 'default', textDecoration: 'none', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px', fontSize: '9px' }}>
-                            Off-chain
-                          </span>
+
                         </div>
                       </div>
                     );
@@ -1046,10 +1138,10 @@ function App() {
 
                       <div className="history-item-right">
                         <span className="history-amount">
-                          {isStake ? '+' : '-'}{parseFloat(formatUSDC(tx.amount)).toFixed(2)} USDC
+                          {isStake ? '+' : '-'}{parseFloat(formatAAVE(tx.amount)).toFixed(2)} AAVE
                         </span>
                         <a 
-                          href={`https://sepolia.basescan.org/tx/${tx.tx_hash}`} 
+                          href={`https://basescan.org/tx/${tx.tx_hash}`} 
                           target="_blank" 
                           rel="noopener noreferrer" 
                           className="history-tx-link"

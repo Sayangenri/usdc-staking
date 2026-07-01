@@ -17,13 +17,13 @@ interface IERC20 {
 }
 
 /**
- * @title USDCStaking
- * @dev A simplified staking contract for USDC on Base.
- * Users can stake USDC tokens, and withdrawals are handled here.
+ * @title AAVEStaking
+ * @dev A simplified staking contract for AAVE on Base.
+ * Users can stake AAVE tokens, and withdrawals are handled here.
  * The point reward system is tracked off-chain by listening to events.
  */
-contract USDCStaking {
-    IERC20 public immutable usdcToken;
+contract AAVEStaking {
+    IERC20 public immutable aaveToken;
 
     uint256 private _totalSupply;
     mapping(address => uint256) private _balances;
@@ -33,24 +33,24 @@ contract USDCStaking {
     event Withdrawn(address indexed user, uint256 amount);
 
     /**
-     * @param _usdcToken Address of the USDC token (or ERC-20 token) to stake.
+     * @param _aaveToken Address of the AAVE token (or ERC-20 token) to stake.
      */
-    constructor(address _usdcToken) {
-        require(_usdcToken != address(0), "Invalid token address");
-        usdcToken = IERC20(_usdcToken);
+    constructor(address _aaveToken) {
+        require(_aaveToken != address(0), "Invalid token address");
+        aaveToken = IERC20(_aaveToken);
     }
 
     // View Functions
 
     /**
-     * @dev Returns total USDC staked in the contract.
+     * @dev Returns total AAVE staked in the contract.
      */
     function totalSupply() external view returns (uint256) {
         return _totalSupply;
     }
 
     /**
-     * @dev Returns USDC staked by a specific account.
+     * @dev Returns AAVE staked by a specific account.
      */
     function balanceOf(address account) external view returns (uint256) {
         return _balances[account];
@@ -59,8 +59,8 @@ contract USDCStaking {
     // Mutative Functions
 
     /**
-     * @dev Stake USDC tokens into the contract.
-     * User must approve the contract to spend USDC beforehand.
+     * @dev Stake AAVE tokens into the contract.
+     * User must approve the contract to spend AAVE beforehand.
      */
     function stake(uint256 amount) external {
         require(amount > 0, "Cannot stake 0");
@@ -68,13 +68,13 @@ contract USDCStaking {
         _totalSupply += amount;
         _balances[msg.sender] += amount;
         
-        require(usdcToken.transferFrom(msg.sender, address(this), amount), "USDC transfer failed");
+        require(aaveToken.transferFrom(msg.sender, address(this), amount), "AAVE transfer failed");
         
         emit Staked(msg.sender, amount);
     }
 
     /**
-     * @dev Withdraw staked USDC tokens.
+     * @dev Withdraw staked AAVE tokens.
      */
     function withdraw(uint256 amount) external {
         require(amount > 0, "Cannot withdraw 0");
@@ -83,13 +83,13 @@ contract USDCStaking {
         _totalSupply -= amount;
         _balances[msg.sender] -= amount;
         
-        require(usdcToken.transfer(msg.sender, amount), "USDC transfer failed");
+        require(aaveToken.transfer(msg.sender, amount), "AAVE transfer failed");
         
         emit Withdrawn(msg.sender, amount);
     }
 
     /**
-     * @dev Withdraw all staked USDC tokens.
+     * @dev Withdraw all staked AAVE tokens.
      */
     function exit() external {
         uint256 stakedAmount = _balances[msg.sender];
@@ -98,7 +98,7 @@ contract USDCStaking {
         _totalSupply -= stakedAmount;
         _balances[msg.sender] = 0;
         
-        require(usdcToken.transfer(msg.sender, stakedAmount), "USDC transfer failed");
+        require(aaveToken.transfer(msg.sender, stakedAmount), "AAVE transfer failed");
         
         emit Withdrawn(msg.sender, stakedAmount);
     }

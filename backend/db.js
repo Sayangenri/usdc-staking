@@ -30,7 +30,7 @@ try {
 const connectionString = process.env.DATABASE_URL || {
   user: process.env.DB_USER || 'postgres',
   host: process.env.DB_HOST || 'localhost',
-  database: process.env.DB_NAME || 'usdc_staking',
+  database: process.env.DB_NAME || 'aave_staking',
   password: process.env.DB_PASSWORD || '',
   port: parseInt(process.env.DB_PORT || '5432', 10),
 };
@@ -38,13 +38,17 @@ const connectionString = process.env.DATABASE_URL || {
 const poolConfig = typeof connectionString === 'string'
   ? { 
       connectionString,
-      connectionTimeoutMillis: 10000, // 10 seconds connection timeout
-      query_timeout: 15000,          // 15 seconds query timeout (prevents hanging queries)
+      max: 20,                          // Maximum clients in pool
+      idleTimeoutMillis: 30000,         // Close idle clients after 30 seconds
+      connectionTimeoutMillis: 15000,   // 15 seconds connection timeout
+      query_timeout: 30000,             // 30 seconds query timeout
     }
   : {
       ...connectionString,
-      connectionTimeoutMillis: 10000,
-      query_timeout: 15000,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 15000,
+      query_timeout: 30000,
     };
 
 const pool = new Pool(poolConfig);
@@ -97,18 +101,7 @@ async function initDb() {
     INSERT INTO sync_status (id, last_synced_block) VALUES (1, 43093800) ON CONFLICT (id) DO NOTHING;
   `;
 
-  const createStakingRewardClaimsTable = `
-    CREATE TABLE IF NOT EXISTS staking_reward_claims (
-      id SERIAL PRIMARY KEY,
-      user_address VARCHAR(42) NOT NULL,
-      points_redeemed NUMERIC(78, 0) NOT NULL,
-      reward_type VARCHAR(50) DEFAULT 'POINTS_CLAIM',
-      tx_hash VARCHAR(66),
-      status VARCHAR(20) DEFAULT 'COMPLETED',
-      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_claims_user ON staking_reward_claims(user_address);
-  `;
+
 
   try {
     console.log('Connecting to PostgreSQL database...');
@@ -119,7 +112,7 @@ async function initDb() {
     await client.query(createStakingActionsTable);
     await client.query(createUserBalancesTable);
     await client.query(createSyncStatusTable);
-    await client.query(createStakingRewardClaimsTable);
+
     console.log('Database tables verified/created successfully.');
     
     client.release();

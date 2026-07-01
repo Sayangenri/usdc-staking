@@ -27,23 +27,23 @@ try {
 }
 
 // 1. Configuration
-const RPC_URL = process.env.RPC_URL || 'https://sepolia.base.org'; // Default to Base Sepolia RPC
+const RPC_URL = process.env.RPC_URL || 'https://mainnet.base.org'; // Default to Base Mainnet RPC
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
-// Default Base Sepolia USDC contract address
-const USDC_ADDRESS = process.env.USDC_ADDRESS || '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+// Default Base Mainnet AAVE contract address
+const AAVE_ADDRESS = process.env.AAVE_ADDRESS || '0x63706e401c06ac8513145b7687a14804d17f814b';
 
 // 2. Compilation Helper (Synthesizes compiled artifacts)
 function getContractArtifacts() {
   try {
     const solc = require('solc');
-    console.log('Compiling USDCStaking.sol on-the-fly using solc...');
-    const contractPath = path.join(__dirname, 'USDCStaking.sol');
+    console.log('Compiling AAVEStaking.sol on-the-fly using solc...');
+    const contractPath = path.join(__dirname, 'AAVEStaking.sol');
     const source = fs.readFileSync(contractPath, 'utf8');
 
     const input = {
       language: 'Solidity',
       sources: {
-        'USDCStaking.sol': {
+        'AAVEStaking.sol': {
           content: source,
         },
       },
@@ -66,7 +66,7 @@ function getContractArtifacts() {
       }
     }
 
-    const compiled = output.contracts['USDCStaking.sol']['USDCStaking'];
+    const compiled = output.contracts['AAVEStaking.sol']['AAVEStaking'];
     return {
       abi: compiled.abi,
       bytecode: compiled.evm.bytecode.object
@@ -74,11 +74,11 @@ function getContractArtifacts() {
   } catch (error) {
     if (error.code === 'MODULE_NOT_FOUND') {
       console.log('solc not found, checking for local artifact...');
-      const artifactPath = path.join(__dirname, 'USDCStaking.json');
+      const artifactPath = path.join(__dirname, 'AAVEStaking.json');
       if (fs.existsSync(artifactPath)) {
         return JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
       } else {
-        console.error('Error: "solc" npm package is not installed and no pre-compiled contracts/USDCStaking.json was found.');
+        console.error('Error: "solc" npm package is not installed and no pre-compiled contracts/AAVEStaking.json was found.');
         console.error('To install solc: npm install solc -g or run npm install solc inside backend folder.');
         process.exit(1);
       }
@@ -107,23 +107,23 @@ async function main() {
   const { abi, bytecode } = getContractArtifacts();
 
   // 5. Deploy Contract
-  console.log(`Target USDC token address (Base Sepolia): ${USDC_ADDRESS}`);
-  console.log('Deploying USDCStaking contract...');
+  console.log(`Target AAVE token address (Base Mainnet): ${AAVE_ADDRESS}`);
+  console.log('Deploying AAVEStaking contract...');
 
   const factory = new ethers.ContractFactory(abi, bytecode, wallet);
-  const contract = await factory.deploy(USDC_ADDRESS);
+  const contract = await factory.deploy(AAVE_ADDRESS);
   
   console.log('Waiting for deployment transaction to be mined...');
   await contract.waitForDeployment();
   
   const contractAddress = await contract.getAddress();
-  console.log(`USDCStaking deployed successfully to: ${contractAddress}`);
+  console.log(`AAVEStaking deployed successfully to: ${contractAddress}`);
 
   // 6. Save Deployment Info for Frontend and Backend
   const deploymentInfo = {
     address: contractAddress,
     abi: abi,
-    usdcAddress: USDC_ADDRESS,
+    aaveAddress: AAVE_ADDRESS,
     deployedAt: new Date().toISOString(),
     network: RPC_URL
   };
@@ -131,20 +131,20 @@ async function main() {
   const outputJSON = JSON.stringify(deploymentInfo, null, 2);
 
   // Save to contracts/ folder
-  fs.writeFileSync(path.join(__dirname, 'USDCStaking.json'), JSON.stringify({ abi, bytecode }, null, 2));
+  fs.writeFileSync(path.join(__dirname, 'AAVEStaking.json'), JSON.stringify({ abi, bytecode }, null, 2));
 
   // Save to backend/ folder
   const backendDir = path.join(__dirname, '../backend');
   if (fs.existsSync(backendDir)) {
-    fs.writeFileSync(path.join(backendDir, 'USDCStaking.json'), outputJSON);
-    console.log(`Saved deployment info to backend/USDCStaking.json`);
+    fs.writeFileSync(path.join(backendDir, 'AAVEStaking.json'), outputJSON);
+    console.log(`Saved deployment info to backend/AAVEStaking.json`);
   }
 
   // Save to frontend/src/ folder if exists
   const frontendSrcDir = path.join(__dirname, '../frontend/src');
   if (fs.existsSync(frontendSrcDir)) {
-    fs.writeFileSync(path.join(frontendSrcDir, 'USDCStaking.json'), outputJSON);
-    console.log(`Saved deployment info to frontend/src/USDCStaking.json`);
+    fs.writeFileSync(path.join(frontendSrcDir, 'AAVEStaking.json'), outputJSON);
+    console.log(`Saved deployment info to frontend/src/AAVEStaking.json`);
   }
 }
 

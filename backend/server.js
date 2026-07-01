@@ -66,7 +66,7 @@ let contractAbi = null;
 let deployedAtBlock = 0;
 
 try {
-  const artifactPath = path.join(__dirname, 'USDCStaking.json');
+  const artifactPath = path.join(__dirname, 'AAVEStaking.json');
   if (fs.existsSync(artifactPath)) {
     const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
     contractAddress = contractAddress || artifact.address;
@@ -74,12 +74,22 @@ try {
     deployedAtBlock = artifact.deployedAtBlock || 0;
   }
 } catch (error) {
-  console.error('Indexer: Error reading USDCStaking.json:', error.message);
+  console.error('Indexer: Error reading AAVEStaking.json:', error.message);
 }
 
 function getProvider() {
-  const rpcUrl = process.env.RPC_URL || 'https://sepolia.base.org';
-  return new ethers.JsonRpcProvider(rpcUrl);
+  const mainRpcUrl = process.env.RPC_URL || 'https://mainnet.base.org';
+  const fallbackUrls = [
+    mainRpcUrl,
+    'https://base.meowrpc.com',
+    'https://base.gateway.tenderly.co'
+  ];
+  const configs = fallbackUrls.map((url, idx) => ({
+    provider: new ethers.JsonRpcProvider(url, undefined, { staticNetwork: true }),
+    priority: idx + 1,
+    weight: 1
+  }));
+  return new ethers.FallbackProvider(configs);
 }
 
 let isSyncing = false;
@@ -111,7 +121,7 @@ async function syncBlockchainEvents() {
   if (!contractAddress || !contractAbi) {
     console.log('Indexer: Staking contract not yet deployed or configured. Skipping sync...');
     try {
-      const artifactPath = path.join(__dirname, 'USDCStaking.json');
+      const artifactPath = path.join(__dirname, 'AAVEStaking.json');
       if (fs.existsSync(artifactPath)) {
         const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
         contractAddress = artifact.address;
@@ -127,7 +137,23 @@ async function syncBlockchainEvents() {
   const provider = getProvider();
   
   try {
-    const currentBlock = await provider.getBlockNumber();
+    // Check if contract is deployed to avoid BAD_DATA / log fetching errors on undeployed contract
+    let code;
+    try {
+      code = await provider.getCode(contractAddress);
+    } catch (rpcErr) {
+      console.warn(`Indexer: RPC connection error checking contract code: ${rpcErr.message}. Skipping this sync cycle...`);
+      isSyncing = false;
+      return;
+    }
+
+    if (code === '0x' || code === '0x0') {
+      console.log(`Indexer: Staking contract ${contractAddress} is not deployed on this network. Skipping sync...`);
+      isSyncing = false;
+      return;
+    }
+
+    const currentBlock = Math.max(0, await provider.getBlockNumber() - 3);
 
     // 1. Get last synced block from sync_status table
     const dbResult = await db.query('SELECT last_synced_block FROM sync_status WHERE id = 1');

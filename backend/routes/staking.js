@@ -5,27 +5,37 @@ const path = require('path');
 const { ethers } = require('ethers');
 const db = require('../db');
 
-// Load contract details from USDCStaking.json if available
+// Load contract details from AAVEStaking.json if available
 let contractAddress = process.env.STAKING_CONTRACT_ADDRESS;
 let contractAbi = null;
-let usdcAddress = process.env.USDC_CONTRACT_ADDRESS || '0x036CbD53842c5426634e7929541eC2318f3dCF7e'; // Default Base Sepolia USDC
+let aaveAddress = process.env.AAVE_CONTRACT_ADDRESS || '0x63706E401C06Ac8513145b7687A14804d17F814b'; // Default Base Mainnet AAVE
 
 try {
-  const artifactPath = path.join(__dirname, '../USDCStaking.json');
+  const artifactPath = path.join(__dirname, '../AAVEStaking.json');
   if (fs.existsSync(artifactPath)) {
     const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
     contractAddress = contractAddress || artifact.address;
     contractAbi = artifact.abi;
-    usdcAddress = usdcAddress || artifact.usdcAddress;
-    console.log(`Routes loaded contract info. Address: ${contractAddress}, USDC: ${usdcAddress}`);
+    aaveAddress = aaveAddress || artifact.aaveAddress;
+    console.log(`Routes loaded contract info. Address: ${contractAddress}, Token: ${aaveAddress}`);
   }
 } catch (error) {
-  console.error('Routes: Error reading USDCStaking.json:', error.message);
+  console.error('Routes: Error reading AAVEStaking.json:', error.message);
 }
 
 function getProvider() {
-  const rpcUrl = process.env.RPC_URL || 'https://sepolia.base.org';
-  return new ethers.JsonRpcProvider(rpcUrl);
+  const mainRpcUrl = process.env.RPC_URL || 'https://mainnet.base.org';
+  const fallbackUrls = [
+    mainRpcUrl,
+    'https://base.meowrpc.com',
+    'https://base.gateway.tenderly.co'
+  ];
+  const configs = fallbackUrls.map((url, idx) => ({
+    provider: new ethers.JsonRpcProvider(url, undefined, { staticNetwork: true }),
+    priority: idx + 1,
+    weight: 1
+  }));
+  return new ethers.FallbackProvider(configs);
 }
 
 /**
@@ -44,10 +54,10 @@ router.get('/history/:address', async (req, res) => {
     const stakingActionsQuery = `
       SELECT tx_hash, action_type, amount, block_number, timestamp
       FROM staking_actions
-      WHERE LOWER(user_address) = LOWER($1)
+      WHERE user_address = $1
       ORDER BY timestamp DESC
     `;
-    const stakingResult = await db.query(stakingActionsQuery, [userAddress]);
+    const stakingResult = await db.query(stakingActionsQuery, [userAddress.toLowerCase()]);
 
     const stakingHistory = stakingResult.rows.map(row => ({
       type: 'staking',
@@ -58,15 +68,9 @@ router.get('/history/:address', async (req, res) => {
       timestamp: row.timestamp
     }));
 
-    // 2. Fetch points history (if registered in users table)
-    const userRes = await db.query(
-      'SELECT id FROM users WHERE LOWER(wallet_address) = LOWER($1)',
-      [userAddress]
-    );
-
+    // 2. Fetch points history
     let pointsHistory = [];
-    if (userRes.rows.length > 0) {
-      const userId = userRes.rows[0].id;
+    try {
       const pointsHistoryQuery = `
         SELECT 
           ph.id, 
@@ -77,6 +81,7 @@ router.get('/history/:address', async (req, res) => {
           other_u.email as peer_email,
           other_u.username as peer_username
         FROM points_history ph
+        JOIN users u ON ph.user_id = u.id
         LEFT JOIN points_history other_ph ON (
           -- Match by base prefix ID if generated sequentially
           ((RIGHT(ph.id, 1) = '0' AND other_ph.id = SUBSTRING(ph.id, 1, LENGTH(ph.id) - 1) || '1') OR
@@ -91,10 +96,10 @@ router.get('/history/:address', async (req, res) => {
            ))
         )
         LEFT JOIN users other_u ON other_ph.user_id = other_u.id
-        WHERE ph.user_id = $1
+        WHERE u.wallet_address = $1
         ORDER BY ph.created_at DESC
       `;
-      const pointsResult = await db.query(pointsHistoryQuery, [userId]);
+      const pointsResult = await db.query(pointsHistoryQuery, [userAddress.toLowerCase()]);
       pointsHistory = pointsResult.rows.map(row => ({
         type: 'points',
         id: row.id,
@@ -105,6 +110,8 @@ router.get('/history/:address', async (req, res) => {
         peer_email: row.peer_email,
         peer_username: row.peer_username
       }));
+    } catch (err) {
+      console.error('Error fetching points history:', err.message);
     }
 
     // 3. Combine and sort
@@ -133,7 +140,7 @@ router.get('/status/:address', async (req, res) => {
   const responseData = {
     address: userAddress.toLowerCase(),
     onChain: {
-      usdcBalance: '0',
+      aaveBalance: '0',
       stakedBalance: '0'
     },
     database: {
@@ -150,21 +157,28 @@ router.get('/status/:address', async (req, res) => {
   // 1. Fetch from Database
   try {
     const userRes = await db.query(
-      'SELECT total_points FROM users WHERE LOWER(wallet_address) = LOWER($1)',
-      [userAddress]
+      'SELECT total_points FROM users WHERE wallet_address = $1',
+      [userAddress.toLowerCase()]
     );
 
+    if (userRes.rows.length > 0) {
+      const loyaltyPoints = userRes.rows[0].total_points || 0;
+      responseData.database.finalizedPoints = loyaltyPoints.toString();
+      responseData.database.estimatedTotalPoints = loyaltyPoints.toString();
+    }
+
     const dbResult = await db.query(
-      'SELECT staked_balance, points, uncredited_seconds, last_checkpoint_time FROM user_balances WHERE LOWER(user_address) = LOWER($1)',
-      [userAddress]
+      'SELECT staked_balance, points, uncredited_seconds, last_checkpoint_time FROM user_balances WHERE user_address = $1',
+      [userAddress.toLowerCase()]
     );
 
     if (dbResult.rows.length > 0) {
       const row = dbResult.rows[0];
       const stakedBalance = BigInt(row.staked_balance || '0');
-      const finalizedPoints = userRes.rows.length > 0
+      const loyaltyPoints = userRes.rows.length > 0
         ? BigInt(userRes.rows[0].total_points || '0')
-        : BigInt(row.points || '0');
+        : 0n;
+      const finalizedPoints = BigInt(row.points || '0') + loyaltyPoints;
       const uncreditedSeconds = parseInt(row.uncredited_seconds || '0', 10);
       const lastCheckpointTime = new Date(row.last_checkpoint_time);
 
@@ -176,8 +190,7 @@ router.get('/status/:address', async (req, res) => {
         const now = new Date();
         const elapsedSeconds = Math.max(0, Math.floor((now.getTime() - lastCheckpointTime.getTime()) / 1000));
         totalSeconds = elapsedSeconds + uncreditedSeconds;
-        const pendingHours = Math.floor(totalSeconds / 3600);
-        pendingPoints = BigInt(pendingHours * 10);
+        pendingPoints = BigInt(Math.floor(totalSeconds / 3600) * 10);
         secondsToNextHour = 3600 - (totalSeconds % 3600);
       }
 
@@ -199,12 +212,12 @@ router.get('/status/:address', async (req, res) => {
   try {
     const provider = getProvider();
     
-    // Create standard ERC-20 contract interface for USDC
-    const usdcAbi = [
+    // Create standard ERC-20 contract interface for AAVE
+    const aaveAbi = [
       'function balanceOf(address account) external view returns (uint256)'
     ];
-    const usdcContract = new ethers.Contract(usdcAddress, usdcAbi, provider);
-    const balancePromise = usdcContract.balanceOf(userAddress).catch(() => 0n);
+    const aaveContract = new ethers.Contract(aaveAddress, aaveAbi, provider);
+    const balancePromise = aaveContract.balanceOf(userAddress).catch(() => 0n);
 
     let stakedPromise = Promise.resolve(0n);
     if (contractAddress && contractAbi) {
@@ -212,13 +225,13 @@ router.get('/status/:address', async (req, res) => {
       stakedPromise = stakingContract.balanceOf(userAddress).catch(() => 0n);
     }
 
-    const [usdcBalance, stakedBalance] = await Promise.all([
+    const [aaveBalance, stakedBalance] = await Promise.all([
       balancePromise,
       stakedPromise
     ]);
 
     responseData.onChain = {
-      usdcBalance: usdcBalance.toString(),
+      aaveBalance: aaveBalance.toString(),
       stakedBalance: stakedBalance.toString()
     };
   } catch (chainError) {
@@ -239,11 +252,11 @@ router.get('/leaderboard', async (req, res) => {
       SELECT 
         ub.user_address, 
         ub.staked_balance, 
-        COALESCE(u.total_points, ub.points) as points, 
+        (COALESCE(u.total_points, 0) + ub.points) as points, 
         ub.uncredited_seconds, 
         ub.last_checkpoint_time
       FROM user_balances ub
-      LEFT JOIN users u ON LOWER(u.wallet_address) = LOWER(ub.user_address)
+      LEFT JOIN users u ON u.wallet_address = ub.user_address
       ORDER BY ub.staked_balance DESC, points DESC
       LIMIT 50
     `;
@@ -299,7 +312,7 @@ router.get('/leaderboard', async (req, res) => {
 router.get('/stats', async (req, res) => {
   const stats = {
     contractAddress: contractAddress || null,
-    usdcAddress: usdcAddress || null,
+    aaveAddress: aaveAddress || null,
     tvl: '0',
     totalStakers: 0,
     timestamp: new Date().toISOString()
@@ -325,9 +338,12 @@ router.get('/stats', async (req, res) => {
   if (contractAddress && contractAbi) {
     try {
       const provider = getProvider();
-      const contract = new ethers.Contract(contractAddress, contractAbi, provider);
-      const onChainTvl = await contract.totalSupply();
-      stats.tvl = onChainTvl.toString();
+      const code = await provider.getCode(contractAddress).catch(() => '0x');
+      if (code !== '0x' && code !== '0x0') {
+        const contract = new ethers.Contract(contractAddress, contractAbi, provider);
+        const onChainTvl = await contract.totalSupply();
+        stats.tvl = onChainTvl.toString();
+      }
     } catch (chainError) {
       console.warn('Blockchain TVL fetch failed, using DB sum:', chainError.message);
     }
@@ -365,15 +381,15 @@ router.post('/transfer-points', async (req, res) => {
 
     // 2. Verify and Lock Sender in users table (Auto-create if not exists to support dApp stakers)
     let senderRes = await client.query(
-      'SELECT id, wallet_address, total_points FROM users WHERE LOWER(wallet_address) = LOWER($1) FOR UPDATE',
-      [senderAddress]
+      'SELECT id, wallet_address, total_points FROM users WHERE wallet_address = $1 FOR UPDATE',
+      [senderAddress.toLowerCase()]
     );
 
     if (senderRes.rows.length === 0) {
       // Fetch initial points balance from user_balances if they exist
       const balanceRes = await client.query(
-        'SELECT points FROM user_balances WHERE LOWER(user_address) = LOWER($1)',
-        [senderAddress]
+        'SELECT points FROM user_balances WHERE user_address = $1',
+        [senderAddress.toLowerCase()]
       );
       const initialPoints = balanceRes.rows.length > 0 ? parseInt(balanceRes.rows[0].points || '0', 10) : 0;
       const newSenderId = Date.now().toString() + Math.floor(Math.random() * 100).toString().padStart(2, '0');
@@ -385,7 +401,7 @@ router.post('/transfer-points', async (req, res) => {
       await client.query(
         `INSERT INTO users (id, privy_id, email, wallet_address, total_points, streak, league, referrals, created_at, updated_at, last_active_at)
          VALUES ($1, $2, $3, $4, $5, 0, 'Bronze', 0, NOW(), NOW(), NOW())`,
-        [newSenderId, dummyPrivyId, dummyEmail, senderAddress, initialPoints]
+        [newSenderId, dummyPrivyId, dummyEmail, senderAddress.toLowerCase(), initialPoints]
       );
 
       // Lock row
@@ -396,7 +412,14 @@ router.post('/transfer-points', async (req, res) => {
     }
 
     const senderUser = senderRes.rows[0];
-    const senderTotalPoints = senderUser.total_points || 0;
+
+    // Fetch sender's staking points
+    const senderBalRes = await client.query(
+      'SELECT points FROM user_balances WHERE user_address = $1',
+      [senderAddress.toLowerCase()]
+    );
+    const senderStakingPoints = senderBalRes.rows.length > 0 ? parseInt(senderBalRes.rows[0].points || '0', 10) : 0;
+    const senderTotalPoints = (senderUser.total_points || 0) + senderStakingPoints;
 
     if (senderTotalPoints < transferAmount) {
       throw new Error(`Insufficient points balance. Sender has ${senderTotalPoints} points, attempting to transfer ${transferAmount}.`);
@@ -406,20 +429,51 @@ router.post('/transfer-points', async (req, res) => {
     const recipientRes = await client.query(
       `SELECT id, wallet_address, total_points 
        FROM users 
-       WHERE LOWER(wallet_address) = LOWER($1) 
+       WHERE wallet_address = $1 
           OR LOWER(email) = LOWER($1) 
           OR LOWER(username) = LOWER($1) 
           OR id = $1 
        FOR UPDATE`,
-      [recipientAddress]
+      [recipientAddress.toLowerCase()]
     );
 
-    if (recipientRes.rows.length === 0) {
-      throw new Error(`Recipient (${recipientAddress}) is not registered in the users table.`);
-    }
+    let recipientUser = null;
+    let targetWalletAddress = null;
 
-    const recipientUser = recipientRes.rows[0];
-    const targetWalletAddress = recipientUser.wallet_address;
+    if (recipientRes.rows.length === 0) {
+      if (!ethers.isAddress(recipientAddress)) {
+        throw new Error(`Recipient (${recipientAddress}) is not a registered user and is not a valid Ethereum address.`);
+      }
+
+      // Query initial points balance from user_balances if they exist
+      const balanceRes = await client.query(
+        'SELECT points FROM user_balances WHERE user_address = $1',
+        [recipientAddress.toLowerCase()]
+      );
+      const initialPoints = balanceRes.rows.length > 0 ? parseInt(balanceRes.rows[0].points || '0', 10) : 0;
+      const newRecipientId = Date.now().toString() + Math.floor(Math.random() * 100).toString().padStart(2, '0') + '_recv';
+
+      const dummyPrivyId = `did:privy:staking-${recipientAddress.toLowerCase()}`;
+      const dummyEmail = `${recipientAddress.toLowerCase()}@staking.dummy`;
+
+      // Insert recipient into users table
+      await client.query(
+        `INSERT INTO users (id, privy_id, email, wallet_address, total_points, streak, league, referrals, created_at, updated_at, last_active_at)
+         VALUES ($1, $2, $3, $4, $5, 0, 'Bronze', 0, NOW(), NOW(), NOW())`,
+        [newRecipientId, dummyPrivyId, dummyEmail, recipientAddress.toLowerCase(), initialPoints]
+      );
+
+      // Lock row
+      const lockedRes = await client.query(
+        'SELECT id, wallet_address, total_points FROM users WHERE id = $1 FOR UPDATE',
+        [newRecipientId]
+      );
+      recipientUser = lockedRes.rows[0];
+      targetWalletAddress = recipientUser.wallet_address;
+    } else {
+      recipientUser = recipientRes.rows[0];
+      targetWalletAddress = recipientUser.wallet_address;
+    }
 
     if (senderAddress.toLowerCase() === targetWalletAddress.toLowerCase()) {
       throw new Error('Cannot transfer points to yourself.');

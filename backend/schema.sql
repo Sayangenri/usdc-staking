@@ -1,5 +1,5 @@
 -- ====================================================================
--- Base USDC Staking dApp - Database Schema & Operations Reference
+-- Base AAVE Staking dApp - Database Schema & Operations Reference
 -- ====================================================================
 
 -- --------------------------------------------------------------------
@@ -37,20 +37,10 @@ CREATE TABLE IF NOT EXISTS sync_status (
   id INT PRIMARY KEY,
   last_synced_block INT NOT NULL
 );
--- Default starting checkpoint block (Base Sepolia contract deployment block)
-INSERT INTO sync_status (id, last_synced_block) VALUES (1, 43093800) ON CONFLICT (id) DO NOTHING;
+-- Default starting checkpoint block (Base Mainnet contract deployment block)
+INSERT INTO sync_status (id, last_synced_block) VALUES (1, 48024300) ON CONFLICT (id) DO NOTHING;
 
--- 4. Create Staking Reward Claims Table (For future off-chain point redemption logs)
-CREATE TABLE IF NOT EXISTS staking_reward_claims (
-  id SERIAL PRIMARY KEY,
-  user_address VARCHAR(42) NOT NULL,
-  points_redeemed NUMERIC(78, 0) NOT NULL,
-  reward_type VARCHAR(50) DEFAULT 'POINTS_CLAIM',
-  tx_hash VARCHAR(66),
-  status VARCHAR(20) DEFAULT 'COMPLETED',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_claims_user ON staking_reward_claims(user_address);
+
 
 
 -- --------------------------------------------------------------------

@@ -66,15 +66,15 @@
   font-weight: 600;
   background: var(--base-blue-bg);
   border: 1px solid rgba(0, 82, 255, 0.2);
-  color: #a5f3fc;
+  color: var(--base-blue);
 }
 
 .network-dot {
   width: 8px;
   height: 8px;
-  background-color: var(--accent-cyan);
+  background-color: var(--base-blue);
   border-radius: 50%;
-  box-shadow: 0 0 8px var(--accent-cyan);
+  box-shadow: 0 0 8px rgba(0, 82, 255, 0.4);
 }
 
 /* Buttons */
@@ -95,15 +95,15 @@
 }
 
 .btn-primary {
-  background: #0f172a;
+  background: var(--base-blue);
   color: white;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 4px 12px rgba(0, 82, 255, 0.15);
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-2px);
-  background: #1e293b;
-  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+  background: #0045db;
+  box-shadow: 0 6px 20px rgba(0, 82, 255, 0.25);
 }
 
 .btn-primary:active:not(:disabled) {
@@ -111,8 +111,9 @@
 }
 
 .btn-primary:disabled {
-  background: var(--border-color);
-  color: var(--text-muted);
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
   box-shadow: none;
   cursor: not-allowed;
 }
@@ -283,10 +284,10 @@
   font-weight: 700;
 }
 
-.token-logo-usdc {
+.token-logo-aave {
   width: 20px;
   height: 20px;
-  background: #2775ca;
+  background: #5f3ec5;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -561,21 +562,24 @@
 }
 
 .custom-alert.error {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #c53030;
+  font-weight: 600;
 }
 
 .custom-alert.success {
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.2);
-  color: #a7f3d0;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #065f46;
+  font-weight: 600;
 }
 
 .custom-alert.info {
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.2);
-  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  color: #1d4ed8;
+  font-weight: 600;
 }
 
 /* Empty State */

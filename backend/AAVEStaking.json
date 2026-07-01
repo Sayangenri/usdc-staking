@@ -1,11 +1,11 @@
 {
-  "address": "0x98811FF6CC74749DE01d479d3AeE14e53602e746",
+  "address": "0xe4f185a337211019ac116f35267c932979Edd5e7",
   "abi": [
     {
       "inputs": [
         {
           "internalType": "address",
-          "name": "_usdcToken",
+          "name": "_aaveToken",
           "type": "address"
         }
       ],
@@ -49,6 +49,19 @@
       ],
       "name": "Withdrawn",
       "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "aaveToken",
+      "outputs": [
+        {
+          "internalType": "contract IERC20",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
     },
     {
       "inputs": [
@@ -103,19 +116,6 @@
       "type": "function"
     },
     {
-      "inputs": [],
-      "name": "usdcToken",
-      "outputs": [
-        {
-          "internalType": "contract IERC20",
-          "name": "",
-          "type": "address"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
       "inputs": [
         {
           "internalType": "uint256",
@@ -129,7 +129,7 @@
       "type": "function"
     }
   ],
-  "usdcAddress": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-  "deployedAt": "2026-06-20T11:44:24.145Z",
-  "network": "https://sepolia.base.org"
+  "aaveAddress": "0x63706e401c06ac8513145b7687a14804d17f814b",
+  "deployedAt": "2026-06-30T16:56:36.586Z",
+  "network": "https://mainnet.base.org"
 }

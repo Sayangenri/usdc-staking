@@ -194,7 +194,7 @@
 
 .card-title {
   font-family: var(--font-heading);
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 600;
   margin-bottom: 20px;
   display: flex;
@@ -426,12 +426,19 @@
   color: var(--text-muted);
   text-transform: uppercase;
   border-bottom: 1px solid var(--border-color);
+  text-align: left;
 }
 
 .leaderboard-table td {
   padding: 12px 12px;
   font-size: 14px;
   border-bottom: 1px solid #f1f5f9;
+  text-align: left;
+}
+
+.leaderboard-table th:first-child,
+.leaderboard-table td:first-child {
+  text-align: center;
 }
 
 .leaderboard-row:hover {
@@ -493,6 +500,19 @@
   border-radius: 12px;
   border: 1px solid var(--border-color);
   font-size: 13px;
+  transition: all 0.2s ease;
+}
+
+.history-item.type-stake {
+  background: rgba(16, 185, 129, 0.02) !important;
+  border: 1px solid rgba(16, 185, 129, 0.15) !important;
+  border-left: 3.5px solid #10b981 !important;
+}
+
+.history-item.type-withdraw {
+  background: rgba(239, 68, 68, 0.02) !important;
+  border: 1px solid rgba(239, 68, 68, 0.15) !important;
+  border-left: 3.5px solid #ef4444 !important;
 }
 
 .history-item-left {
@@ -617,4 +637,90 @@
   font-family: var(--font-mono);
   font-size: 12px;
   flex-grow: 1;
+}
+
+/* Responsive mobile optimizations */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 12px 16px 40px;
+    gap: 16px;
+  }
+
+  .app-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 12px 0;
+  }
+
+  .brand {
+    justify-content: center;
+  }
+
+  .header-actions {
+    justify-content: space-between;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .btn-wallet {
+    flex-grow: 1;
+    justify-content: center;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .stat-card {
+    padding: 16px;
+  }
+
+  .stat-card .value {
+    font-size: 24px;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .col-left, .col-right {
+    gap: 16px;
+  }
+
+  .staking-card, .leaderboard-card, .history-card, .points-card {
+    padding: 16px;
+  }
+
+  .points-counter-large {
+    font-size: 36px;
+  }
+
+  .points-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .timer-section {
+    font-size: 12px;
+    flex-wrap: wrap;
+  }
+  
+  .history-item {
+    padding: 10px;
+  }
+}
+
+/* Disable number input spinner arrows */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield; /* Firefox */
 }

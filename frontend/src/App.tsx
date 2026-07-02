@@ -1,18 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
-import { 
-  Coins, 
-  Lock, 
-  Unlock, 
-  History, 
-  Award, 
-  AlertTriangle, 
-  CheckCircle, 
-  ExternalLink, 
-  Clock, 
+import {
+  AlertTriangle,
+  CheckCircle,
+  ExternalLink,
+  Clock,
   Settings,
   RefreshCw,
   Wallet,
-  Send,
   Info
 } from 'lucide-react';
 import './App.css';
@@ -33,7 +27,7 @@ function App() {
   const [account, setAccount] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [networkName, setNetworkName] = useState<string>('Not Connected');
-  
+
   // Contracts configuration
   const [stakingAddress, setStakingAddress] = useState<string>(stakingArtifact.address || '');
   const [aaveAddress, setAaveAddress] = useState<string>(stakingArtifact.aaveAddress || BASE_MAINNET_AAVE);
@@ -58,6 +52,7 @@ function App() {
 
   // Lists
   const [history, setHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
 
   // Inputs
@@ -112,15 +107,18 @@ function App() {
   };
 
   // 2. Fetch user's status (balances + points) and history
-  const fetchUserData = async (walletAddress: string) => {
+  const fetchUserData = async (walletAddress: string, isSilent: boolean = false) => {
     if (!walletAddress) return;
-    
+    if (!isSilent) {
+      setHistoryLoading(true);
+    }
+
     // Fetch status (API returns both DB and on-chain values)
     try {
       const statusRes = await fetch(`${BACKEND_URL}/api/staking/status/${walletAddress}`);
       if (statusRes.ok) {
         const statusData = await statusRes.json();
-        
+
         // Database point states
         setFinalizedPoints(statusData.database.finalizedPoints);
         setEstimatedTotalPoints(statusData.database.estimatedTotalPoints);
@@ -148,6 +146,7 @@ function App() {
 
     // Check allowance on-chain directly
     await checkOnChainAllowance(walletAddress);
+    setHistoryLoading(false);
   };
 
   // Check allowance directly on-chain using window.ethereum provider
@@ -156,12 +155,12 @@ function App() {
     try {
       const { ethers } = await import('ethers');
       const provider = new ethers.BrowserProvider(window.ethereum);
-      
+
       const aaveAbi = [
         'function balanceOf(address account) external view returns (uint256)',
         'function allowance(address owner, address spender) external view returns (uint256)'
       ];
-      
+
       const aaveContract = new ethers.Contract(aaveAddress, aaveAbi, provider);
       const currentAllowance = await aaveContract.allowance(walletAddress, stakingAddress);
       setAllowance(formatAAVE(currentAllowance));
@@ -212,7 +211,7 @@ function App() {
   const connectWallet = async () => {
     setError(null);
     setSuccessMsg(null);
-    
+
     if (typeof window.ethereum === 'undefined') {
       setError('MetaMask or another EVM wallet was not detected. Please install a wallet to continue.');
       return;
@@ -220,7 +219,7 @@ function App() {
 
     try {
       const { ethers } = await import('ethers');
-      
+
       // Request accounts
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
       const activeAddress = accounts[0];
@@ -229,7 +228,7 @@ function App() {
 
       const provider = new ethers.BrowserProvider(window.ethereum);
       let network = await provider.getNetwork();
-      
+
       // Handle Base Mainnet Chain ID (8453)
       if (network.chainId !== 8453n) {
         const switched = await switchNetwork();
@@ -276,7 +275,7 @@ function App() {
       setError('Please enter a valid amount greater than 0.');
       return;
     }
-    
+
     setError(null);
     setSuccessMsg(null);
     setLoading(true);
@@ -299,18 +298,18 @@ function App() {
       const aaveAbi = [
         'function approve(address spender, uint256 amount) external returns (bool)'
       ];
-      
+
       const aaveContract = new ethers.Contract(aaveAddress, aaveAbi, signer);
-      
+
       // Approve max amount to avoid repeated approvals
       const maxAmount = ethers.MaxUint256;
-      
+
       console.log('Requesting AAVE approval...');
       const tx = await aaveContract.approve(stakingAddress, maxAmount);
       setSuccessMsg('Approval transaction submitted! Waiting for confirmation...');
-      
+
       await tx.wait();
-      
+
       setSuccessMsg('AAVE approved successfully! Initiating stake transaction...');
       await fetchUserData(account);
 
@@ -320,16 +319,16 @@ function App() {
       ];
       const stakingContract = new ethers.Contract(stakingAddress, stakingAbi, signer);
       const parsedAmount = ethers.parseUnits(stakeAmount, 18);
-      
+
       console.log(`Automatically staking ${stakeAmount} AAVE after approval...`);
       const stakeTx = await stakingContract.stake(parsedAmount);
       setSuccessMsg('Staking transaction submitted! Waiting for confirmation...');
-      
+
       await stakeTx.wait();
-      
+
       setSuccessMsg(`Staked ${stakeAmount} AAVE successfully!`);
       setStakeAmount('');
-      
+
       // Fetch latest stats & user data
       await fetchUserData(account);
       await fetchGlobalData();
@@ -385,7 +384,7 @@ function App() {
       setTransferSuccess(`Transferred ${amt} PTS to ${transferRecipient.slice(0, 6)}...${transferRecipient.slice(-4)} successfully!`);
       setTransferRecipient('');
       setTransferAmount('');
-      
+
       // Refresh user stats & global rankings
       await fetchUserData(account);
       await fetchGlobalData();
@@ -402,7 +401,7 @@ function App() {
       setError('Please connect your wallet first.');
       return;
     }
-    
+
     if (!stakeAmount || parseFloat(stakeAmount) <= 0) {
       setError('Please enter a valid amount greater than 0.');
       return;
@@ -430,21 +429,21 @@ function App() {
       const stakingAbi = [
         'function stake(uint256 amount) external'
       ];
-      
+
       const stakingContract = new ethers.Contract(stakingAddress, stakingAbi, signer);
-      
+
       // Parse with 18 decimals for AAVE
       const parsedAmount = ethers.parseUnits(stakeAmount, 18);
-      
+
       console.log(`Staking ${stakeAmount} AAVE...`);
       const tx = await stakingContract.stake(parsedAmount);
       setSuccessMsg('Staking transaction submitted! Waiting for confirmation...');
-      
+
       await tx.wait();
-      
+
       setSuccessMsg(`Staked ${stakeAmount} AAVE successfully!`);
       setStakeAmount('');
-      
+
       // Fetch latest stats & user data
       await fetchUserData(account);
       await fetchGlobalData();
@@ -461,7 +460,7 @@ function App() {
       setError('Please connect your wallet first.');
       return;
     }
-    
+
     if (!unstakeAmount || parseFloat(unstakeAmount) <= 0) {
       setError('Please enter a valid amount greater than 0.');
       return;
@@ -489,21 +488,21 @@ function App() {
       const stakingAbi = [
         'function withdraw(uint256 amount) external'
       ];
-      
+
       const stakingContract = new ethers.Contract(stakingAddress, stakingAbi, signer);
-      
+
       // Parse with 18 decimals for AAVE
       const parsedAmount = ethers.parseUnits(unstakeAmount, 18);
-      
+
       console.log(`Unstaking ${unstakeAmount} AAVE...`);
       const tx = await stakingContract.withdraw(parsedAmount);
       setSuccessMsg('Withdraw transaction submitted! Waiting for confirmation...');
-      
+
       await tx.wait();
-      
+
       setSuccessMsg(`Withdrew ${unstakeAmount} AAVE successfully!`);
       setUnstakeAmount('');
-      
+
       // Fetch latest stats & user data
       await fetchUserData(account);
       await fetchGlobalData();
@@ -519,34 +518,53 @@ function App() {
   useEffect(() => {
     // Initial fetch
     fetchGlobalData();
-    
-    // Check if wallet accounts changed
-    if (window.ethereum) {
-      window.ethereum.on('accountsChanged', (accounts: string[]) => {
-        if (accounts.length > 0) {
-          setAccount(accounts[0]);
-          setIsConnected(true);
-          fetchUserData(accounts[0]);
-        } else {
-          disconnectWallet();
-        }
-      });
 
-      window.ethereum.on('chainChanged', () => {
-        window.location.reload();
-      });
+    // Setup event listeners for wallet events
+    const handleAccountsChanged = (accounts: string[]) => {
+      console.log('Metamask accountsChanged event triggered:', accounts);
+      if (accounts.length > 0) {
+        const newAccount = accounts[0];
+        setAccount(newAccount);
+        setIsConnected(true);
+        
+        // Reset balances of old user immediately to prevent visual lag or stale data display
+        setAaveBalance('...');
+        setStakedBalance('...');
+        setAllowance('...');
+        setFinalizedPoints('...');
+        setEstimatedTotalPoints('...');
+        
+        // Load new account data immediately
+        fetchUserData(newAccount);
+      } else {
+        disconnectWallet();
+      }
+    };
+
+    const handleChainChanged = () => {
+      console.log('Metamask chainChanged event triggered.');
+      window.location.reload();
+    };
+
+    if (window.ethereum) {
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      window.ethereum.on('chainChanged', handleChainChanged);
     }
 
     // Poll data from backend
     const dataInterval = setInterval(() => {
       fetchGlobalData();
       if (account) {
-        fetchUserData(account);
+        fetchUserData(account, true);
       }
     }, 10000);
 
     return () => {
       clearInterval(dataInterval);
+      if (window.ethereum) {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+        window.ethereum.removeListener('chainChanged', handleChainChanged);
+      }
     };
   }, [account, stakingAddress, aaveAddress]);
 
@@ -589,6 +607,17 @@ function App() {
     }
   };
 
+  const formatNumberSafe = (val: string, decimals: number = 2, isPoints: boolean = false) => {
+    if (!val || val === '...' || isNaN(Number(val))) {
+      return '...';
+    }
+    const parsed = parseFloat(val);
+    if (isPoints) {
+      return parsed.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    }
+    return parsed.toFixed(decimals);
+  };
+
   const shortenAddress = (addr: string) => {
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   };
@@ -614,23 +643,23 @@ function App() {
       {/* Header */}
       <header className="app-header">
         <div className="brand">
-          <img src="/myradlogo.png" className="brand-logo" alt="MYRAD Logo" style={{ 
-            background: 'transparent', 
+          <img src="/myradlogo.png" className="brand-logo" alt="MYRAD Logo" style={{
+            background: 'transparent',
             borderRadius: '8px',
             objectFit: 'contain'
           }} />
           <div className="brand-text">
-            <h1 style={{ 
-              letterSpacing: '1px', 
-              fontFamily: "var(--font-heading)", 
-              fontSize: '20px', 
+            <h1 style={{
+              letterSpacing: '1px',
+              fontFamily: "var(--font-heading)",
+              fontSize: '20px',
               fontWeight: 800,
               lineHeight: 1
             }}>
-              MYRAD <span style={{ 
-                fontFamily: "'Instrument Serif', Georgia, serif", 
-                fontStyle: 'italic', 
-                textTransform: 'lowercase', 
+              MYRAD <span style={{
+                fontFamily: "'Instrument Serif', Georgia, serif",
+                fontStyle: 'italic',
+                textTransform: 'lowercase',
                 fontWeight: 400,
                 fontSize: '22px',
                 marginLeft: '2px',
@@ -681,9 +710,9 @@ function App() {
           <div className="config-input-row">
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
               <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Staking Contract Address</label>
-              <input 
-                type="text" 
-                className="config-input" 
+              <input
+                type="text"
+                className="config-input"
                 value={stakingAddress}
                 onChange={(e) => setStakingAddress(e.target.value)}
                 placeholder="0x..."
@@ -691,9 +720,9 @@ function App() {
             </div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
               <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>AAVE Token Address</label>
-              <input 
-                type="text" 
-                className="config-input" 
+              <input
+                type="text"
+                className="config-input"
                 value={aaveAddress}
                 onChange={(e) => setAaveAddress(e.target.value)}
                 placeholder="0x..."
@@ -753,18 +782,17 @@ function App() {
           {/* Staking Card */}
           <section className="staking-card glass-card">
             <h2 className="card-title">
-              <Coins size={20} className="gradient-text-blue" />
               Staking Dashboard
             </h2>
 
             <div className="tabs">
-              <div 
+              <div
                 className={`tab ${activeTab === 'stake' ? 'active' : ''}`}
                 onClick={() => setActiveTab('stake')}
               >
                 Stake
               </div>
-              <div 
+              <div
                 className={`tab ${activeTab === 'unstake' ? 'active' : ''}`}
                 onClick={() => setActiveTab('unstake')}
               >
@@ -780,17 +808,17 @@ function App() {
                     <span>
                       Wallet Balance:{' '}
                       <span className="balance-helper" onClick={handleMaxStake}>
-                        {parseFloat(aaveBalance).toFixed(2)} AAVE
+                        {formatNumberSafe(aaveBalance)} AAVE
                       </span>
                     </span>
                   )}
                 </div>
 
                 <div className="input-wrapper">
-                  <input 
-                    type="number" 
-                    className="stake-input" 
-                    placeholder="0.00" 
+                  <input
+                    type="number"
+                    className="stake-input"
+                    placeholder="0.00"
                     value={stakeAmount}
                     onChange={(e) => setStakeAmount(e.target.value)}
                     disabled={loading || !isConnected}
@@ -807,16 +835,16 @@ function App() {
                       Connect Wallet to Stake
                     </button>
                   ) : needsApproval ? (
-                    <button 
-                      className="btn btn-primary" 
+                    <button
+                      className="btn btn-primary"
                       onClick={handleApprove}
                       disabled={loading || !stakeAmount || parseFloat(stakeAmount) <= 0}
                     >
                       {loading ? 'Processing...' : 'Approve AAVE'}
                     </button>
                   ) : (
-                    <button 
-                      className="btn btn-primary" 
+                    <button
+                      className="btn btn-primary"
                       onClick={handleStake}
                       disabled={loading || !stakeAmount || parseFloat(stakeAmount) <= 0 || parseFloat(stakeAmount) > parseFloat(aaveBalance)}
                     >
@@ -833,17 +861,17 @@ function App() {
                     <span>
                       Staked Balance:{' '}
                       <span className="balance-helper" onClick={handleMaxUnstake}>
-                        {parseFloat(stakedBalance).toFixed(2)} AAVE
+                        {formatNumberSafe(stakedBalance)} AAVE
                       </span>
                     </span>
                   )}
                 </div>
 
                 <div className="input-wrapper">
-                  <input 
-                    type="number" 
-                    className="stake-input" 
-                    placeholder="0.00" 
+                  <input
+                    type="number"
+                    className="stake-input"
+                    placeholder="0.00"
                     value={unstakeAmount}
                     onChange={(e) => setUnstakeAmount(e.target.value)}
                     disabled={loading || !isConnected}
@@ -860,8 +888,8 @@ function App() {
                       Connect Wallet to Unstake
                     </button>
                   ) : (
-                    <button 
-                      className="btn btn-primary" 
+                    <button
+                      className="btn btn-primary"
                       onClick={handleUnstake}
                       disabled={loading || !unstakeAmount || parseFloat(unstakeAmount) <= 0 || parseFloat(unstakeAmount) > parseFloat(stakedBalance)}
                     >
@@ -877,7 +905,6 @@ function App() {
           <section className="points-card glass-card">
             <div className="points-header">
               <h2 className="card-title" style={{ margin: 0 }}>
-                <Award size={20} className="gradient-text-blue" />
                 Loyalty Point Rewards
               </h2>
               {parseFloat(stakedBalance) > 0 && (
@@ -888,7 +915,7 @@ function App() {
             </div>
 
             <div className="points-counter-large">
-              {parseFloat(estimatedTotalPoints).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+              {formatNumberSafe(estimatedTotalPoints, 0, true)}
               <span className="points-unit">PTS</span>
             </div>
 
@@ -907,25 +934,25 @@ function App() {
             <div className="points-breakdown">
               <div className="breakdown-item">
                 <span className="label">On-Chain Staked</span>
-                <span className="val">{parseFloat(stakedBalance).toFixed(2)} AAVE</span>
+                <span className="val">{formatNumberSafe(stakedBalance)} AAVE</span>
               </div>
               <div className="breakdown-item">
                 <span className="label">Accrued</span>
-                <span className="val">{parseFloat(finalizedPoints).toLocaleString()} PTS</span>
+                <span className="val">{formatNumberSafe(finalizedPoints, 0, true)} PTS</span>
               </div>
               <div className="breakdown-item">
                 <span className="label">Uncredited Session</span>
                 <span className="val">{formatTime(uncreditedSeconds)}</span>
               </div>
             </div>
-            
+
             {/* Info text explaining daily database update */}
-            <div style={{ 
-              fontSize: '11px', 
-              color: 'var(--text-muted)', 
-              marginTop: '14px', 
-              display: 'flex', 
-              alignItems: 'flex-start', 
+            <div style={{
+              fontSize: '11px',
+              color: 'var(--text-muted)',
+              marginTop: '14px',
+              display: 'flex',
+              alignItems: 'flex-start',
               gap: '6px',
               background: 'rgba(0, 82, 255, 0.03)',
               padding: '8px 12px',
@@ -943,17 +970,16 @@ function App() {
           {isConnected && (
             <section className="staking-card glass-card">
               <h2 className="card-title">
-                <Send size={20} className="gradient-text-blue" />
                 Transfer Points
               </h2>
-              
+
               {transferError && (
                 <div className="custom-alert error" style={{ fontSize: '13px', padding: '10px 14px', marginBottom: '16px' }}>
                   <AlertTriangle size={16} />
                   <span>{transferError}</span>
                 </div>
               )}
-              
+
               {transferSuccess && (
                 <div className="custom-alert success" style={{ fontSize: '13px', padding: '10px 14px', marginBottom: '16px' }}>
                   <CheckCircle size={16} />
@@ -963,14 +989,14 @@ function App() {
 
               <form onSubmit={handleTransferPoints}>
                 <div className="input-label-row" style={{ fontSize: '13px', marginBottom: '6px' }}>
-                  <span>Recipient (ID, Email, Username, or Address)</span>
+                  <span>Recipient Wallet Address</span>
                 </div>
                 <div className="input-wrapper" style={{ height: '48px', marginBottom: '16px' }}>
-                  <input 
-                    type="text" 
-                    className="stake-input" 
+                  <input
+                    type="text"
+                    className="stake-input"
                     style={{ fontSize: '14px', padding: '0 12px', height: '44px' }}
-                    placeholder="email, username, 0x..., or user ID" 
+                    placeholder="0x..."
                     value={transferRecipient}
                     onChange={(e) => setTransferRecipient(e.target.value)}
                     disabled={transferLoading}
@@ -981,11 +1007,11 @@ function App() {
                   <span>Amount of Points</span>
                 </div>
                 <div className="input-wrapper" style={{ height: '48px', marginBottom: '20px' }}>
-                  <input 
-                    type="number" 
-                    className="stake-input" 
+                  <input
+                    type="number"
+                    className="stake-input"
                     style={{ fontSize: '14px', padding: '0 12px', height: '44px' }}
-                    placeholder="0" 
+                    placeholder="0"
                     value={transferAmount}
                     onChange={(e) => setTransferAmount(e.target.value)}
                     disabled={transferLoading}
@@ -995,9 +1021,9 @@ function App() {
                   </div>
                 </div>
 
-                <button 
-                  type="submit" 
-                  className="btn btn-primary" 
+                <button
+                  type="submit"
+                  className="btn btn-primary"
                   style={{ width: '100%', height: '48px', fontSize: '14px' }}
                   disabled={transferLoading || !transferRecipient || !transferAmount}
                 >
@@ -1013,7 +1039,6 @@ function App() {
           {/* Leaderboard Card */}
           <section className="leaderboard-card glass-card">
             <h2 className="card-title">
-              <Award size={20} className="gradient-text-blue" />
               Leaderboard
             </h2>
 
@@ -1026,33 +1051,44 @@ function App() {
                     <tr>
                       <th style={{ width: '50px' }}>Rank</th>
                       <th>Staker Wallet</th>
-                      <th style={{ textAlign: 'right' }}>Staked</th>
-                      <th style={{ textAlign: 'right' }}>Points</th>
+                      <th>Staked</th>
+                      <th>Points</th>
                     </tr>
                   </thead>
                   <tbody>
                     {leaderboard.map((staker, idx) => {
                       const isMe = account && staker.address.toLowerCase() === account.toLowerCase();
                       const rank = idx + 1;
-                      
+
+                      // Dynamic background highlight for top 3 or current user
+                      let rowStyle = {};
+                      if (rank === 1) rowStyle = { background: 'rgba(251, 191, 36, 0.05)' };
+                      else if (rank === 2) rowStyle = { background: 'rgba(156, 163, 175, 0.04)' };
+                      else if (rank === 3) rowStyle = { background: 'rgba(180, 83, 9, 0.03)' };
+
+                      if (isMe) rowStyle = { ...rowStyle, background: 'rgba(0, 82, 255, 0.04)', borderLeft: '3px solid var(--base-blue)' };
+
                       return (
-                        <tr key={staker.address} className={`leaderboard-row ${isMe ? 'current-user' : ''}`}>
-                          <td>
-                            {rank <= 3 ? (
-                              <span className={`rank-badge rank-${rank}`}>{rank}</span>
-                            ) : (
-                              <span>#{rank}</span>
-                            )}
+                        <tr key={staker.address} className={`leaderboard-row ${isMe ? 'current-user' : ''}`} style={rowStyle}>
+                          <td style={{ fontWeight: rank <= 3 ? 700 : 500 }}>
+                            {rank}
                           </td>
                           <td>
-                            <span className="leaderboard-address">
+                            <span className="leaderboard-address" style={{
+                              background: isMe ? 'var(--base-blue-bg)' : '#f1f5f9',
+                              padding: '4px 8px',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: 500,
+                              color: isMe ? 'var(--base-blue)' : 'var(--text-secondary)'
+                            }}>
                               {isMe ? `${shortenAddress(staker.address)} (You)` : shortenAddress(staker.address)}
                             </span>
                           </td>
-                          <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                          <td style={{ fontFamily: 'var(--font-mono)' }}>
                             {parseFloat(formatAAVE(staker.stakedBalance)).toFixed(2)} AAVE
                           </td>
-                          <td style={{ textAlign: 'right', fontWeight: 'bold' }} className="leaderboard-pts">
+                          <td style={{ fontWeight: 'bold' }} className="leaderboard-pts">
                             {parseFloat(staker.estimatedTotalPoints).toLocaleString()}
                           </td>
                         </tr>
@@ -1067,13 +1103,14 @@ function App() {
           {/* History Card */}
           <section className="history-card glass-card">
             <h2 className="card-title">
-              <History size={20} className="gradient-text-blue" />
               Activity Logs
             </h2>
 
             <div className="history-list">
               {!isConnected ? (
                 <div className="empty-state">Connect wallet to view history.</div>
+              ) : historyLoading ? (
+                <div className="empty-state">...</div>
               ) : history.length === 0 ? (
                 <div className="empty-state">No recent activities found.</div>
               ) : (
@@ -1081,11 +1118,11 @@ function App() {
                   const isPoints = tx.type === 'points';
                   const formattedTime = new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                   const formattedDate = new Date(tx.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
-                  
+
                   if (isPoints) {
                     const isSent = tx.reason === 'points_transfer_sent';
                     const isReceived = tx.reason === 'points_transfer_received';
-                    
+
                     let actionLabel = 'Points Action';
                     if (isSent) {
                       const targetStr = tx.peer_address ? shortenAddress(tx.peer_address) : (tx.peer_username || tx.peer_email || 'unknown');
@@ -1099,12 +1136,9 @@ function App() {
                       actionLabel = tx.reason ? tx.reason.replace(/_/g, ' ') : 'Points Earned';
                     }
 
-                    return (
-                      <div key={tx.id || idx} className="history-item">
+                      return (
+                      <div key={tx.id || idx} className={`history-item ${isSent ? 'type-withdraw' : 'type-stake'}`}>
                         <div className="history-item-left">
-                          <div className={`history-icon ${isSent ? 'withdraw' : 'stake'}`}>
-                            {isSent ? <Send size={14} /> : <Award size={14} />}
-                          </div>
                           <div className="history-item-info">
                             <span className="history-action-label" style={{ textTransform: 'capitalize' }}>
                               {actionLabel}
@@ -1125,11 +1159,8 @@ function App() {
 
                   const isStake = tx.action_type === 'STAKE';
                   return (
-                    <div key={tx.tx_hash || idx} className="history-item">
+                    <div key={tx.tx_hash || idx} className={`history-item ${isStake ? 'type-stake' : 'type-withdraw'}`}>
                       <div className="history-item-left">
-                        <div className={`history-icon ${isStake ? 'stake' : 'withdraw'}`}>
-                          {isStake ? <Lock size={14} /> : <Unlock size={14} />}
-                        </div>
                         <div className="history-item-info">
                           <span className="history-action-label">{isStake ? 'Staked' : 'Withdrew'}</span>
                           <span className="history-time">{formattedDate} • {formattedTime}</span>
@@ -1140,10 +1171,10 @@ function App() {
                         <span className="history-amount">
                           {isStake ? '+' : '-'}{parseFloat(formatAAVE(tx.amount)).toFixed(2)} AAVE
                         </span>
-                        <a 
-                          href={`https://basescan.org/tx/${tx.tx_hash}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
+                        <a
+                          href={`https://basescan.org/tx/${tx.tx_hash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="history-tx-link"
                         >
                           Tx <ExternalLink size={8} style={{ display: 'inline' }} />

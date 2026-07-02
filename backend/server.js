@@ -92,6 +92,8 @@ function getProvider() {
   return new ethers.FallbackProvider(configs);
 }
 
+const globalProvider = getProvider();
+
 let isSyncing = false;
 const blockTimestampCache = {};
 
@@ -134,7 +136,7 @@ async function syncBlockchainEvents() {
   }
 
   isSyncing = true;
-  const provider = getProvider();
+  const provider = globalProvider;
   
   try {
     // Check if contract is deployed to avoid BAD_DATA / log fetching errors on undeployed contract

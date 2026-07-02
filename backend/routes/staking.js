@@ -38,6 +38,8 @@ function getProvider() {
   return new ethers.FallbackProvider(configs);
 }
 
+const globalProvider = getProvider();
+
 /**
  * GET /api/staking/history/:address
  * Returns transaction history.
@@ -210,7 +212,7 @@ router.get('/status/:address', async (req, res) => {
 
   // 2. Fetch from Blockchain (On-Chain)
   try {
-    const provider = getProvider();
+    const provider = globalProvider;
     
     // Create standard ERC-20 contract interface for AAVE
     const aaveAbi = [
@@ -337,7 +339,7 @@ router.get('/stats', async (req, res) => {
   // 2. Query contract for actual TVL to display on-chain accurate status
   if (contractAddress && contractAbi) {
     try {
-      const provider = getProvider();
+      const provider = globalProvider;
       const code = await provider.getCode(contractAddress).catch(() => '0x');
       if (code !== '0x' && code !== '0x0') {
         const contract = new ethers.Contract(contractAddress, contractAbi, provider);
